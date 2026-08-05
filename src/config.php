@@ -58,6 +58,25 @@ function ensureEmpresasTable(PDO $pdo): void
     ensureCodCvmColumn($pdo);
     ensureIndex($pdo, 'empresas', 'idx_empresas_nome_da_empresa', 'CREATE INDEX idx_empresas_nome_da_empresa ON empresas (nome_da_empresa)');
     ensureIndex($pdo, 'empresas', 'idx_empresas_cod_cvm', 'CREATE INDEX idx_empresas_cod_cvm ON empresas (cod_cvm)');
+    ensureTickersTable($pdo);
+}
+
+function ensureTickersTable(PDO $pdo): void
+{
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS tickers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            id_empresa INT NOT NULL,
+            bolsa VARCHAR(20) NOT NULL,
+            ticker VARCHAR(30) NOT NULL,
+            INDEX idx_tickers_id_empresa (id_empresa),
+            INDEX idx_tickers_bolsa (bolsa),
+            CONSTRAINT fk_tickers_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
+        )'
+    );
+
+    ensureIndex($pdo, 'tickers', 'idx_tickers_id_empresa', 'CREATE INDEX idx_tickers_id_empresa ON tickers (id_empresa)');
+    ensureIndex($pdo, 'tickers', 'idx_tickers_bolsa', 'CREATE INDEX idx_tickers_bolsa ON tickers (bolsa)');
 }
 
 function ensureCodCvmColumn(PDO $pdo): void
