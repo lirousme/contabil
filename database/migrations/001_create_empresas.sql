@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS indicadores (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(255) NOT NULL,
     descricao TEXT NULL DEFAULT NULL,
-    formato ENUM('Moeda', 'Porcentagem', 'Data', 'Texto') NOT NULL,
+    formato ENUM('Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto') NOT NULL,
     INDEX idx_indicadores_nome (nome)
 );
 
