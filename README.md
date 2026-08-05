@@ -5,7 +5,7 @@ Aplicação PHP simples para cadastro, edição, listagem e exclusão de empresa
 ## Configuração
 
 1. Copie `.env.example` para `.env` e preencha as credenciais do banco.
-2. Execute a migração em `database/migrations/001_create_empresas.sql`.
+2. A aplicação cria automaticamente a tabela `empresas` ao abrir a página; se preferir, execute manualmente a migração em `database/migrations/001_create_empresas.sql`.
 3. Inicie a aplicação:
 
 ```bash

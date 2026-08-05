@@ -11,7 +11,7 @@ function loadEnv(string $path): void
     foreach ($lines as $line) {
         $line = trim($line);
 
-        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+        if ($line === '' || strpos($line, '#') === 0 || strpos($line, '=') === false) {
             continue;
         }
 
@@ -41,4 +41,15 @@ function db(): PDO
     ]);
 
     return $pdo;
+}
+
+function ensureEmpresasTable(PDO $pdo): void
+{
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS empresas (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome_da_empresa VARCHAR(255) NOT NULL,
+            cod_cvm INT NULL DEFAULT NULL
+        )'
+    );
 }
