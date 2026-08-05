@@ -27,3 +27,14 @@ CREATE TABLE IF NOT EXISTS resultados (
     CONSTRAINT fk_resultados_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE,
     CONSTRAINT fk_resultados_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS comentarios_indicadores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    comentario TEXT NULL DEFAULT NULL,
+    id_indicador INT NOT NULL,
+    id_empresa INT NOT NULL,
+    UNIQUE KEY uniq_comentarios_indicadores_empresa_indicador (id_empresa, id_indicador),
+    INDEX idx_comentarios_indicadores_id_indicador (id_indicador),
+    CONSTRAINT fk_comentarios_indicadores_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE,
+    CONSTRAINT fk_comentarios_indicadores_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
+);
