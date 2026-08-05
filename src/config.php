@@ -49,14 +49,27 @@ function ensureEmpresasTable(PDO $pdo): void
         'CREATE TABLE IF NOT EXISTS empresas (
             id INT AUTO_INCREMENT PRIMARY KEY,
             nome_da_empresa VARCHAR(255) NOT NULL,
-            cod_cvm INT NULL DEFAULT NULL,
+            cod_cvm VARCHAR(20) NULL DEFAULT NULL,
             INDEX idx_empresas_nome_da_empresa (nome_da_empresa),
             INDEX idx_empresas_cod_cvm (cod_cvm)
         )'
     );
 
+    ensureCodCvmColumn($pdo);
     ensureIndex($pdo, 'empresas', 'idx_empresas_nome_da_empresa', 'CREATE INDEX idx_empresas_nome_da_empresa ON empresas (nome_da_empresa)');
     ensureIndex($pdo, 'empresas', 'idx_empresas_cod_cvm', 'CREATE INDEX idx_empresas_cod_cvm ON empresas (cod_cvm)');
+}
+
+function ensureCodCvmColumn(PDO $pdo): void
+{
+    $stmt = $pdo->query(
+        "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'empresas' AND COLUMN_NAME = 'cod_cvm'"
+    );
+
+    if ($stmt->fetchColumn() !== 'varchar') {
+        $pdo->exec('ALTER TABLE empresas MODIFY cod_cvm VARCHAR(20) NULL DEFAULT NULL');
+    }
 }
 
 function ensureIndex(PDO $pdo, string $table, string $index, string $sql): void

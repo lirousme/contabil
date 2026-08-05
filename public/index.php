@@ -33,7 +33,7 @@ function normalizeCompany(array $company): array
     return [
         'id' => (int) $company['id'],
         'nome_da_empresa' => $company['nome_da_empresa'],
-        'cod_cvm' => $company['cod_cvm'] === null ? null : (int) $company['cod_cvm'],
+        'cod_cvm' => $company['cod_cvm'] === null ? null : (string) $company['cod_cvm'],
     ];
 }
 
@@ -46,7 +46,11 @@ function validateCompany(array $data): array
         throw new InvalidArgumentException('Informe o nome da empresa.');
     }
 
-    return [$nome, $codCvm === '' ? null : (int) $codCvm];
+    if ($codCvm !== '' && !ctype_digit($codCvm)) {
+        throw new InvalidArgumentException('Informe apenas números no código CVM.');
+    }
+
+    return [$nome, $codCvm === '' ? null : $codCvm];
 }
 
 if (($_GET['api'] ?? '') === 'empresas') {
@@ -61,9 +65,9 @@ if (($_GET['api'] ?? '') === 'empresas') {
             $where = '';
 
             if ($search !== '') {
-                $where = 'WHERE nome_da_empresa LIKE :search OR cod_cvm = :cod_cvm';
+                $where = 'WHERE nome_da_empresa LIKE :search OR cod_cvm LIKE :cod_cvm';
                 $params['search'] = $search . '%';
-                $params['cod_cvm'] = ctype_digit($search) ? (int) $search : -1;
+                $params['cod_cvm'] = $search . '%';
             }
 
             $stmt = $pdo->prepare("SELECT id, nome_da_empresa, cod_cvm FROM empresas {$where} ORDER BY id DESC LIMIT 100");
@@ -138,7 +142,7 @@ if (($_GET['api'] ?? '') === 'empresas') {
                 </label>
                 <label class="block">
                     <span class="mb-2 block text-sm font-medium text-slate-300">Código CVM</span>
-                    <input id="cod-cvm" type="number" class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none ring-cyan-500 transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2" placeholder="Opcional">
+                    <input id="cod-cvm" inputmode="numeric" pattern="[0-9]*" class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none ring-cyan-500 transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2" placeholder="Opcional">
                 </label>
                 <div class="flex gap-3">
                     <button id="submit-button" class="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400">Cadastrar</button>
