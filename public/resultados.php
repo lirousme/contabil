@@ -114,6 +114,25 @@ try {
                 $stmt->execute(['nome' => $nome, 'descricao' => $descricao, 'formato' => $formato]);
                 jsonResponse(['message' => 'Indicador cadastrado.'], 201);
             }
+            if ($action === 'indicador_update') {
+                $indicadorId = (int) ($data['id'] ?? 0);
+                $field = $data['field'] ?? '';
+                if ($indicadorId <= 0 || !in_array($field, ['nome', 'descricao'], true)) {
+                    throw new InvalidArgumentException('Indicador inválido.');
+                }
+                $value = trim((string) ($data['value'] ?? ''));
+                if ($field === 'nome' && $value === '') {
+                    throw new InvalidArgumentException('Informe o nome do indicador.');
+                }
+                $stmt = $pdo->prepare(sprintf('UPDATE indicadores SET %s = :value WHERE id = :id', $field));
+                $stmt->execute(['value' => $value, 'id' => $indicadorId]);
+                if ($stmt->rowCount() === 0) {
+                    $check = $pdo->prepare('SELECT COUNT(*) FROM indicadores WHERE id = :id');
+                    $check->execute(['id' => $indicadorId]);
+                    if ((int) $check->fetchColumn() === 0) throw new InvalidArgumentException('Indicador inválido.');
+                }
+                jsonResponse(['message' => 'Indicador atualizado.']);
+            }
             if ($action === 'referencia') {
                 [$periodoBase, $periodoReferencia, $ano, $idEmpresa] = validateReferencia($data, $empresaId);
                 $stmt = $pdo->prepare('INSERT INTO referencias (periodo_base, periodo_referencia, ano, id_empresa) VALUES (:periodo_base, :periodo_referencia, :ano, :id_empresa)');
@@ -231,7 +250,7 @@ try {
         function render() {
             head.innerHTML = `<tr><th class="sticky left-0 z-20 bg-slate-950 px-6 py-4">Indicador</th><th class="px-6 py-4">Descrição</th>${state.referencias.map(ref => `<th class="px-6 py-4 text-center">${escapeHtml(ref.label)}</th>`).join('')}</tr>`;
             if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${2 + state.referencias.length}" class="px-6 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
-            body.innerHTML = state.indicadores.map(indicador => `<tr class="hover:bg-slate-800/50"><td class="sticky left-0 z-10 bg-slate-900 px-6 py-4 font-medium text-white">${escapeHtml(indicador.nome)}</td><td class="px-6 py-4 text-slate-300">${escapeHtml(indicador.descricao || '—')}</td>${state.referencias.map(ref => `<td data-indicador="${indicador.id}" data-referencia="${ref.id}" class="min-w-32 cursor-cell px-6 py-4 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultFor(indicador.id, ref.id)) || '—')}</td>`).join('')}</tr>`).join('');
+            body.innerHTML = state.indicadores.map(indicador => `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-10 cursor-cell bg-slate-900 px-6 py-4 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="cursor-cell px-6 py-4 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td>${state.referencias.map(ref => `<td data-indicador="${indicador.id}" data-referencia="${ref.id}" class="min-w-32 cursor-cell px-6 py-4 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultFor(indicador.id, ref.id)) || '—')}</td>`).join('')}</tr>`).join('');
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
@@ -247,7 +266,35 @@ try {
 
         document.getElementById('indicator-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'indicador', nome: document.getElementById('indicator-name').value, descricao: document.getElementById('indicator-description').value, formato: document.getElementById('indicator-format').value }); closeModals(); event.target.reset(); showNotice('Indicador cadastrado.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
         document.getElementById('reference-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'referencia', periodo_base: periodBase.value, periodo_referencia: periodReference.value, ano: periodYear.value }); closeModals(); showNotice('Referência cadastrada.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
-        body.addEventListener('dblclick', async event => { const cell = event.target.closest('[data-indicador][data-referencia]'); if (!cell) return; const indicador = state.indicadores.find(item => Number(item.id) === Number(cell.dataset.indicador)); const current = cell.textContent === '—' ? '' : cell.textContent.trim(); const input = document.createElement('input'); input.type = indicador.formato === 'Data' ? 'date' : 'text'; input.value = current; input.className = 'w-full rounded-lg border border-cyan-500 bg-slate-950 px-2 py-1 text-center text-white outline-none'; cell.textContent = ''; cell.appendChild(input); input.focus(); async function save() { try { await request('POST', { action: 'resultado', id_indicador: cell.dataset.indicador, id_referencia: cell.dataset.referencia, valor: input.value }); await load(); } catch (error) { showNotice(error.message, 'error'); await load(); } } input.addEventListener('blur', save, { once: true }); input.addEventListener('keydown', event => { if (event.key === 'Enter') input.blur(); }); });
+        function startCellEdit(cell, value, inputType, saveCallback, align = 'text-center') {
+            if (cell.querySelector('input, textarea')) return;
+            const input = document.createElement(inputType === 'textarea' ? 'textarea' : 'input');
+            if (input.tagName === 'INPUT') input.type = inputType;
+            input.value = value;
+            input.className = `w-full rounded-lg border border-cyan-500 bg-slate-950 px-2 py-1 ${align} text-white outline-none`;
+            cell.textContent = '';
+            cell.appendChild(input);
+            input.focus();
+            async function save() { try { await saveCallback(input.value); await load(); } catch (error) { showNotice(error.message, 'error'); await load(); } }
+            input.addEventListener('blur', save, { once: true });
+            input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); input.blur(); } });
+        }
+
+        body.addEventListener('dblclick', async event => {
+            const indicatorCell = event.target.closest('[data-edit-indicator][data-field]');
+            if (indicatorCell) {
+                const indicador = state.indicadores.find(item => Number(item.id) === Number(indicatorCell.dataset.editIndicator));
+                const field = indicatorCell.dataset.field;
+                const current = field === 'descricao' ? (indicador.descricao || '') : indicador.nome;
+                startCellEdit(indicatorCell, current, field === 'descricao' ? 'textarea' : 'text', value => request('POST', { action: 'indicador_update', id: indicador.id, field, value }), 'text-left');
+                return;
+            }
+            const cell = event.target.closest('[data-indicador][data-referencia]');
+            if (!cell) return;
+            const indicador = state.indicadores.find(item => Number(item.id) === Number(cell.dataset.indicador));
+            const current = cell.textContent === '—' ? '' : cell.textContent.trim();
+            startCellEdit(cell, current, indicador.formato === 'Data' ? 'date' : 'text', value => request('POST', { action: 'resultado', id_indicador: cell.dataset.indicador, id_referencia: cell.dataset.referencia, valor: value }));
+        });
         load().catch(error => showNotice(error.message, 'error'));
     </script>
 </body>
