@@ -195,34 +195,25 @@ try {
     <script src="https://cdn.tailwindcss.com"></script>
     <script>tailwind.config = { darkMode: 'class' };</script>
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
-    <aside class="fixed left-3 top-3 z-40 w-48 rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-3 shadow-xl shadow-slate-950/40 backdrop-blur" aria-label="Calculadora rápida">
-        <label for="quick-multiplier" class="block text-xs font-semibold uppercase tracking-wider text-cyan-300">x 1.000</label>
-        <div class="mt-2 flex gap-2">
-            <input id="quick-multiplier" type="text" inputmode="decimal" placeholder="Número" class="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500" autocomplete="off">
-            <button id="quick-copy" type="button" class="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-bold text-slate-950 transition hover:bg-cyan-400" title="Multiplicar por 1.000 e copiar">↗</button>
-        </div>
-        <p id="quick-copy-status" class="mt-2 min-h-4 text-xs text-slate-400">Multiplica e copia.</p>
-    </aside>
-    <main class="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8">
-        <section class="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/40">
-            <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                    <a href="index.php" class="text-sm font-semibold text-cyan-300 hover:text-cyan-200">← Empresas</a>
-                    <p class="mt-4 text-sm font-semibold uppercase tracking-[0.3em] text-cyan-400">Resultados</p>
-                    <h1 id="empresa-title" class="mt-2 text-3xl font-bold tracking-tight text-white">Carregando...</h1>
-                    <p class="mt-2 text-slate-400">Dê dois cliques em uma célula para editar o valor do indicador por referência.</p>
-                </div>
-                <div class="flex gap-3">
-                    <button id="add-indicator" class="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400">+</button>
-                </div>
+<body class="h-screen overflow-hidden bg-slate-950 text-slate-100 antialiased">
+    <main class="flex h-full w-full flex-col gap-2 p-2 sm:p-3">
+        <header class="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/90 px-3 py-2 shadow-lg shadow-slate-950/30">
+            <a href="index.php" class="rounded-lg px-2 py-2 text-sm font-semibold text-cyan-300 transition hover:bg-slate-800 hover:text-cyan-200" aria-label="Voltar para empresas">← Empresas</a>
+            <div class="h-6 w-px bg-slate-700" aria-hidden="true"></div>
+            <h1 id="empresa-title" class="min-w-0 flex-1 truncate text-sm font-semibold text-white">Carregando...</h1>
+            <div class="flex items-center gap-2" aria-label="Calculadora rápida">
+                <label for="quick-multiplier" class="hidden text-xs font-semibold uppercase tracking-wider text-cyan-300 sm:block">x 1.000</label>
+                <input id="quick-multiplier" type="text" inputmode="decimal" placeholder="Número × 1.000" class="w-36 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500 sm:w-40" autocomplete="off">
+                <button id="quick-copy" type="button" class="rounded-lg bg-slate-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-600" title="Multiplicar por 1.000 e copiar">Copiar</button>
+                <span id="quick-copy-status" class="sr-only" aria-live="polite">Multiplica e copia.</span>
             </div>
-            <div id="notice" class="mt-5 hidden rounded-2xl border px-4 py-3 text-sm"></div>
-        </section>
-        <section class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/80 shadow-2xl shadow-slate-950/40">
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-slate-800">
-                    <thead id="results-head" class="bg-slate-950/80 text-left text-xs font-semibold uppercase tracking-wider text-slate-400"></thead>
+            <button id="add-indicator" class="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-bold text-slate-950 transition hover:bg-cyan-400" title="Adicionar indicador">+ Indicador</button>
+            <div id="notice" class="hidden basis-full rounded-lg border px-3 py-2 text-sm"></div>
+        </header>
+        <section class="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-800 bg-slate-900/80 shadow-2xl shadow-slate-950/40">
+            <div class="h-full w-full overflow-auto" id="results-scroll">
+                <table class="min-w-full w-max divide-y divide-slate-800">
+                    <thead id="results-head" class="sticky top-0 z-30 bg-slate-950 text-left text-xs font-semibold uppercase tracking-wider text-slate-400"></thead>
                     <tbody id="results-body" class="divide-y divide-slate-800 text-sm"></tbody>
                 </table>
             </div>
@@ -287,7 +278,6 @@ try {
             const number = parseQuickNumber(quickMultiplier.value);
             if (number === null) {
                 quickCopyStatus.textContent = 'Informe um número válido.';
-                quickCopyStatus.className = 'mt-2 min-h-4 text-xs text-red-300';
                 quickMultiplier.focus();
                 return;
             }
@@ -295,15 +285,15 @@ try {
             try {
                 await navigator.clipboard.writeText(result);
                 quickCopyStatus.textContent = `Copiado: ${result}`;
-                quickCopyStatus.className = 'mt-2 min-h-4 text-xs text-emerald-300';
+                quickCopy.textContent = 'Copiado!';
+                window.setTimeout(() => { quickCopy.textContent = 'Copiar'; }, 1500);
             } catch (error) {
                 quickCopyStatus.textContent = 'Não foi possível copiar.';
-                quickCopyStatus.className = 'mt-2 min-h-4 text-xs text-red-300';
             }
         }
 
         function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char])); }
-        function showNotice(message, type = 'success') { notice.textContent = message; notice.className = `mt-5 rounded-2xl border px-4 py-3 text-sm ${type === 'error' ? 'border-red-500/40 bg-red-950/60 text-red-100' : 'border-emerald-500/40 bg-emerald-950/60 text-emerald-100'}`; }
+        function showNotice(message, type = 'success') { notice.textContent = message; notice.className = `basis-full rounded-lg border px-3 py-2 text-sm ${type === 'error' ? 'border-red-500/40 bg-red-950/60 text-red-100' : 'border-emerald-500/40 bg-emerald-950/60 text-emerald-100'}`; }
         function openModal(modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
         function closeModals() { indicatorModal.classList.add('hidden'); indicatorModal.classList.remove('flex'); }
         function resultFor(indicadorId, referencia) { return state.resultados.find(item => Number(item.id_indicador) === Number(indicadorId) && item.referencia === referencia); }
@@ -330,9 +320,9 @@ try {
         }
 
         function render() {
-            head.innerHTML = `<tr><th class="sticky left-0 z-20 bg-slate-950 px-6 py-4">Indicador</th><th class="px-6 py-4">Descrição</th>${state.referencias.map(ref => `<th class="px-6 py-4 text-center">${escapeHtml(ref)}</th>`).join('')}</tr>`;
-            if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${2 + state.referencias.length}" class="px-6 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
-            body.innerHTML = state.indicadores.map(indicador => `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-10 cursor-cell bg-slate-900 px-6 py-4 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="cursor-cell px-6 py-4 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td>${state.referencias.map(ref => { const resultado = resultFor(indicador.id, ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell px-6 py-4 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`).join('');
+            head.innerHTML = `<tr><th class="sticky left-0 z-40 min-w-48 bg-slate-950 px-4 py-3">Indicador</th><th class="min-w-64 px-4 py-3">Descrição</th>${state.referencias.map(ref => `<th class="min-w-32 px-4 py-3 text-center">${escapeHtml(ref)}</th>`).join('')}</tr>`;
+            if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${2 + state.referencias.length}" class="px-4 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
+            body.innerHTML = state.indicadores.map(indicador => `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-20 min-w-48 cursor-cell bg-slate-900 px-4 py-3 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td>${state.referencias.map(ref => { const resultado = resultFor(indicador.id, ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell whitespace-nowrap px-4 py-3 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`).join('');
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
