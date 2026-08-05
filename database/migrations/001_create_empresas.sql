@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS empresas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome_da_empresa VARCHAR(255) NOT NULL,
+    cod_cvm INT NULL DEFAULT NULL
+);
