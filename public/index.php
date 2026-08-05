@@ -320,7 +320,7 @@ if (($_GET['api'] ?? '') === 'empresas') {
 
                 return `
                 <tr class="hover:bg-slate-800/50">
-                    <td class="px-6 py-4 font-medium text-white">${escapeHtml(company.nome_da_empresa)}</td>
+                    <td class="px-6 py-4 font-medium text-white"><a class="text-cyan-300 transition hover:text-cyan-200 hover:underline" href="resultados.php?empresa=${company.id}">${escapeHtml(company.nome_da_empresa)}</a></td>
                     <td class="px-6 py-4 text-slate-300">${escapeHtml(bvmfTickers)}</td>
                     <td class="px-6 py-4 text-slate-300">${company.cod_cvm ?? '—'}</td>
                     <td class="px-6 py-4">
