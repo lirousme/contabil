@@ -104,6 +104,17 @@ function ensureIndex(PDO $pdo, string $table, string $index, string $sql): void
     }
 }
 
+function tableHasColumn(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+    );
+    $stmt->execute(['table' => $table, 'column' => $column]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
 
 function ensureResultadosTables(PDO $pdo): void
 {
@@ -121,35 +132,56 @@ function ensureResultadosTables(PDO $pdo): void
 
     $pdo->exec("ALTER TABLE indicadores MODIFY formato ENUM('Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto') NOT NULL");
 
-    $pdo->exec(
-        "CREATE TABLE IF NOT EXISTS referencias (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            periodo_base ENUM('trimestre', 'semestre', 'anual') NOT NULL,
-            periodo_referencia INT NULL DEFAULT NULL,
-            ano INT NOT NULL,
-            id_empresa INT NOT NULL,
-            INDEX idx_referencias_id_empresa (id_empresa),
-            UNIQUE KEY uniq_referencias_empresa_periodo (id_empresa, periodo_base, periodo_referencia, ano),
-            CONSTRAINT fk_referencias_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
-        )"
-    );
+    if (tableHasColumn($pdo, 'resultados', 'id_referencia')) {
+        $pdo->exec('DROP TABLE IF EXISTS resultados_nova');
+        $pdo->exec(
+            "CREATE TABLE resultados_nova (
+                id_empresa INT NOT NULL,
+                id_indicador INT NOT NULL,
+                referencia VARCHAR(4) NOT NULL,
+                `data` DATE NULL DEFAULT NULL,
+                `decimal` DECIMAL(20,4) NULL DEFAULT NULL,
+                texto TEXT NULL DEFAULT NULL,
+                UNIQUE KEY uniq_resultados_empresa_indicador_referencia (id_empresa, id_indicador, referencia),
+                INDEX idx_resultados_id_indicador (id_indicador),
+                CONSTRAINT fk_resultados_nova_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE,
+                CONSTRAINT fk_resultados_nova_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
+            )"
+        );
+        $pdo->exec(
+            "INSERT INTO resultados_nova (id_empresa, id_indicador, referencia, `data`, `decimal`, texto)
+            SELECT referencias.id_empresa, resultados.id_indicador,
+                CASE referencias.periodo_base
+                    WHEN 'trimestre' THEN CONCAT(referencias.periodo_referencia, 'T', RIGHT(referencias.ano, 2))
+                    WHEN 'semestre' THEN CONCAT(referencias.periodo_referencia, 'S', RIGHT(referencias.ano, 2))
+                    ELSE CONCAT('A', RIGHT(referencias.ano, 2))
+                END,
+                resultados.`data`, resultados.`decimal`, resultados.texto
+            FROM resultados
+            INNER JOIN referencias ON referencias.id = resultados.id_referencia
+            ON DUPLICATE KEY UPDATE `data` = VALUES(`data`), `decimal` = VALUES(`decimal`), texto = VALUES(texto)"
+        );
+        $pdo->exec('DROP TABLE resultados');
+        $pdo->exec('RENAME TABLE resultados_nova TO resultados');
+    }
 
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS resultados (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            id_referencia INT NOT NULL,
+            id_empresa INT NOT NULL,
             id_indicador INT NOT NULL,
+            referencia VARCHAR(4) NOT NULL,
             `data` DATE NULL DEFAULT NULL,
             `decimal` DECIMAL(20,4) NULL DEFAULT NULL,
             texto TEXT NULL DEFAULT NULL,
-            UNIQUE KEY uniq_resultados_referencia_indicador (id_referencia, id_indicador),
+            UNIQUE KEY uniq_resultados_empresa_indicador_referencia (id_empresa, id_indicador, referencia),
             INDEX idx_resultados_id_indicador (id_indicador),
-            CONSTRAINT fk_resultados_referencia FOREIGN KEY (id_referencia) REFERENCES referencias (id) ON DELETE CASCADE,
+            CONSTRAINT fk_resultados_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE,
             CONSTRAINT fk_resultados_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
         )"
     );
 
+    $pdo->exec('DROP TABLE IF EXISTS referencias');
+
     ensureIndex($pdo, 'indicadores', 'idx_indicadores_nome', 'CREATE INDEX idx_indicadores_nome ON indicadores (nome)');
-    ensureIndex($pdo, 'referencias', 'idx_referencias_id_empresa', 'CREATE INDEX idx_referencias_id_empresa ON referencias (id_empresa)');
     ensureIndex($pdo, 'resultados', 'idx_resultados_id_indicador', 'CREATE INDEX idx_resultados_id_indicador ON resultados (id_indicador)');
 }
