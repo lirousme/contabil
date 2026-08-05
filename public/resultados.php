@@ -41,7 +41,7 @@ function validateIndicador(array $data): array
     $nome = trim($data['nome'] ?? '');
     $descricao = trim($data['descricao'] ?? '');
     $formato = trim($data['formato'] ?? '');
-    $formatos = ['Moeda', 'Porcentagem', 'Data', 'Texto'];
+    $formatos = ['Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto'];
     if ($nome === '') {
         throw new InvalidArgumentException('Informe o nome do indicador.');
     }
@@ -271,7 +271,7 @@ try {
             <h2 class="text-xl font-bold text-white">Novo indicador</h2>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Nome</span><input id="indicator-name" required class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"></label>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Descrição</span><textarea id="indicator-description" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"></textarea></label>
-            <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Formato</span><select id="indicator-format" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"><option>Moeda</option><option>Porcentagem</option><option>Data</option><option>Texto</option></select></label>
+            <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Formato</span><select id="indicator-format" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"><option>Moeda</option><option>Porcentagem</option><option>Número Inteiro</option><option>Data</option><option>Texto</option></select></label>
             <div class="mt-6 flex justify-end gap-3"><button type="button" data-close class="rounded-xl border border-slate-700 px-5 py-3 font-semibold text-slate-200 hover:bg-slate-800">Cancelar</button><button class="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Salvar</button></div>
         </form>
     </div>
@@ -371,6 +371,7 @@ try {
             if (number === null) return resultado.decimal ?? '';
             if (indicador.formato === 'Moeda') return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(number);
             if (indicador.formato === 'Porcentagem') return `${new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(number)}%`;
+            if (indicador.formato === 'Número Inteiro') return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(number);
             return resultado.decimal ?? '';
         }
         function editableValue(indicador, resultado) {
