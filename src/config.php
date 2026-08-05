@@ -103,3 +103,51 @@ function ensureIndex(PDO $pdo, string $table, string $index, string $sql): void
         $pdo->exec($sql);
     }
 }
+
+
+function ensureResultadosTables(PDO $pdo): void
+{
+    ensureEmpresasTable($pdo);
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS indicadores (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(255) NOT NULL,
+            descricao TEXT NULL DEFAULT NULL,
+            formato ENUM('Moeda', 'Porcentagem', 'Data', 'Texto') NOT NULL,
+            INDEX idx_indicadores_nome (nome)
+        )"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS referencias (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            periodo_base ENUM('trimestre', 'semestre', 'anual') NOT NULL,
+            periodo_referencia INT NULL DEFAULT NULL,
+            ano INT NOT NULL,
+            id_empresa INT NOT NULL,
+            INDEX idx_referencias_id_empresa (id_empresa),
+            UNIQUE KEY uniq_referencias_empresa_periodo (id_empresa, periodo_base, periodo_referencia, ano),
+            CONSTRAINT fk_referencias_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
+        )"
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS resultados (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            id_referencia INT NOT NULL,
+            id_indicador INT NOT NULL,
+            `data` DATE NULL DEFAULT NULL,
+            `decimal` DECIMAL(20,4) NULL DEFAULT NULL,
+            texto TEXT NULL DEFAULT NULL,
+            UNIQUE KEY uniq_resultados_referencia_indicador (id_referencia, id_indicador),
+            INDEX idx_resultados_id_indicador (id_indicador),
+            CONSTRAINT fk_resultados_referencia FOREIGN KEY (id_referencia) REFERENCES referencias (id) ON DELETE CASCADE,
+            CONSTRAINT fk_resultados_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
+        )"
+    );
+
+    ensureIndex($pdo, 'indicadores', 'idx_indicadores_nome', 'CREATE INDEX idx_indicadores_nome ON indicadores (nome)');
+    ensureIndex($pdo, 'referencias', 'idx_referencias_id_empresa', 'CREATE INDEX idx_referencias_id_empresa ON referencias (id_empresa)');
+    ensureIndex($pdo, 'resultados', 'idx_resultados_id_indicador', 'CREATE INDEX idx_resultados_id_indicador ON resultados (id_indicador)');
+}
