@@ -51,6 +51,59 @@ function validateIndicador(array $data): array
     return [$nome, $descricao, $formato];
 }
 
+
+function parseDecimalValue(string $value): string
+{
+    $normalized = preg_replace('/[^\d,.-]/', '', trim($value));
+    if ($normalized === null || $normalized === '' || !preg_match('/\d/', $normalized)) {
+        throw new InvalidArgumentException('Informe um número válido.');
+    }
+
+    $negative = str_starts_with($normalized, '-');
+    $normalized = str_replace('-', '', $normalized);
+    $lastComma = strrpos($normalized, ',');
+    $lastDot = strrpos($normalized, '.');
+    $decimalSeparator = null;
+
+    if ($lastComma !== false && $lastDot !== false) {
+        $decimalSeparator = $lastComma > $lastDot ? ',' : '.';
+    } elseif ($lastComma !== false) {
+        $decimalSeparator = ',';
+    } elseif ($lastDot !== false) {
+        $dotCount = substr_count($normalized, '.');
+        $digitsAfterDot = strlen($normalized) - $lastDot - 1;
+        if ($dotCount === 1 && $digitsAfterDot > 0 && $digitsAfterDot !== 3) {
+            $decimalSeparator = '.';
+        }
+    }
+
+    if ($decimalSeparator !== null) {
+        $separatorPosition = strrpos($normalized, $decimalSeparator);
+        $integer = preg_replace('/\D/', '', substr($normalized, 0, $separatorPosition));
+        $fraction = preg_replace('/\D/', '', substr($normalized, $separatorPosition + 1));
+    } else {
+        $integer = preg_replace('/\D/', '', $normalized);
+        $fraction = '';
+    }
+
+    if ($integer === null || $integer === '') {
+        $integer = '0';
+    }
+    if ($fraction === null) {
+        $fraction = '';
+    }
+
+    $decimal = ltrim($integer, '0');
+    if ($decimal === '') {
+        $decimal = '0';
+    }
+    if ($fraction !== '') {
+        $decimal .= '.' . $fraction;
+    }
+
+    return ($negative ? '-' : '') . $decimal;
+}
+
 function validateReferencia(array $data, int $empresaId): array
 {
     $periodoBase = $data['periodo_base'] ?? '';
@@ -154,7 +207,7 @@ try {
                 if ($valor !== '') {
                     if ($formato === 'Data') $fields['data'] = $valor;
                     elseif ($formato === 'Texto') $fields['texto'] = $valor;
-                    else $fields['decimal'] = str_replace(',', '.', $valor);
+                    else $fields['decimal'] = parseDecimalValue($valor);
                 }
                 $upsert = $pdo->prepare('INSERT INTO resultados (id_referencia, id_indicador, `data`, `decimal`, texto) VALUES (:id_referencia, :id_indicador, :data, :decimal, :texto) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`), `decimal` = VALUES(`decimal`), texto = VALUES(texto)');
                 $upsert->execute(['id_referencia' => $referenciaId, 'id_indicador' => $indicadorId, 'data' => $fields['data'], 'decimal' => $fields['decimal'], 'texto' => $fields['texto']]);
@@ -245,12 +298,31 @@ try {
         function openModal(modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
         function closeModals() { [indicatorModal, referenceModal].forEach(modal => { modal.classList.add('hidden'); modal.classList.remove('flex'); }); }
         function resultFor(indicadorId, referenciaId) { return state.resultados.find(item => Number(item.id_indicador) === Number(indicadorId) && Number(item.id_referencia) === Number(referenciaId)); }
-        function displayValue(indicador, resultado) { if (!resultado) return ''; if (indicador.formato === 'Data') return resultado.data ?? ''; if (indicador.formato === 'Texto') return resultado.texto ?? ''; return resultado.decimal ?? ''; }
+        function formatDecimalValue(value) {
+            const number = Number(value);
+            return Number.isFinite(number) ? number : null;
+        }
+        function displayValue(indicador, resultado) {
+            if (!resultado) return '';
+            if (indicador.formato === 'Data') return resultado.data ?? '';
+            if (indicador.formato === 'Texto') return resultado.texto ?? '';
+            const number = formatDecimalValue(resultado.decimal);
+            if (number === null) return resultado.decimal ?? '';
+            if (indicador.formato === 'Moeda') return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(number);
+            if (indicador.formato === 'Porcentagem') return `${new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(number)}%`;
+            return resultado.decimal ?? '';
+        }
+        function editableValue(indicador, resultado) {
+            if (!resultado) return '';
+            if (indicador.formato === 'Data') return resultado.data ?? '';
+            if (indicador.formato === 'Texto') return resultado.texto ?? '';
+            return resultado.decimal ?? '';
+        }
 
         function render() {
             head.innerHTML = `<tr><th class="sticky left-0 z-20 bg-slate-950 px-6 py-4">Indicador</th><th class="px-6 py-4">Descrição</th>${state.referencias.map(ref => `<th class="px-6 py-4 text-center">${escapeHtml(ref.label)}</th>`).join('')}</tr>`;
             if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${2 + state.referencias.length}" class="px-6 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
-            body.innerHTML = state.indicadores.map(indicador => `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-10 cursor-cell bg-slate-900 px-6 py-4 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="cursor-cell px-6 py-4 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td>${state.referencias.map(ref => `<td data-indicador="${indicador.id}" data-referencia="${ref.id}" class="min-w-32 cursor-cell px-6 py-4 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultFor(indicador.id, ref.id)) || '—')}</td>`).join('')}</tr>`).join('');
+            body.innerHTML = state.indicadores.map(indicador => `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-10 cursor-cell bg-slate-900 px-6 py-4 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="cursor-cell px-6 py-4 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td>${state.referencias.map(ref => { const resultado = resultFor(indicador.id, ref.id); return `<td data-indicador="${indicador.id}" data-referencia="${ref.id}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell px-6 py-4 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`).join('');
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
@@ -292,7 +364,7 @@ try {
             const cell = event.target.closest('[data-indicador][data-referencia]');
             if (!cell) return;
             const indicador = state.indicadores.find(item => Number(item.id) === Number(cell.dataset.indicador));
-            const current = cell.textContent === '—' ? '' : cell.textContent.trim();
+            const current = cell.dataset.valor || '';
             startCellEdit(cell, current, indicador.formato === 'Data' ? 'date' : 'text', value => request('POST', { action: 'resultado', id_indicador: cell.dataset.indicador, id_referencia: cell.dataset.referencia, valor: value }));
         });
         load().catch(error => showNotice(error.message, 'error'));
