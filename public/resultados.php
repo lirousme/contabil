@@ -232,6 +232,14 @@ try {
     <script>tailwind.config = { darkMode: 'class' };</script>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+    <aside class="fixed left-3 top-3 z-40 w-48 rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-3 shadow-xl shadow-slate-950/40 backdrop-blur" aria-label="Calculadora rápida">
+        <label for="quick-multiplier" class="block text-xs font-semibold uppercase tracking-wider text-cyan-300">x 1.000</label>
+        <div class="mt-2 flex gap-2">
+            <input id="quick-multiplier" type="text" inputmode="decimal" placeholder="Número" class="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500" autocomplete="off">
+            <button id="quick-copy" type="button" class="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-bold text-slate-950 transition hover:bg-cyan-400" title="Multiplicar por 1.000 e copiar">↗</button>
+        </div>
+        <p id="quick-copy-status" class="mt-2 min-h-4 text-xs text-slate-400">Multiplica e copia.</p>
+    </aside>
     <main class="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8">
         <section class="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/40">
             <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -292,6 +300,59 @@ try {
         const periodReference = document.getElementById('period-reference');
         const periodReferenceWrap = document.getElementById('period-reference-wrap');
         const periodYear = document.getElementById('period-year');
+        const quickMultiplier = document.getElementById('quick-multiplier');
+        const quickCopy = document.getElementById('quick-copy');
+        const quickCopyStatus = document.getElementById('quick-copy-status');
+
+
+        function parseQuickNumber(value) {
+            const normalized = String(value ?? '').trim().replace(/\s/g, '');
+            if (!normalized || !/\d/.test(normalized)) return null;
+            let prepared = normalized.replace(/[^\d,.-]/g, '');
+            const negative = prepared.startsWith('-');
+            prepared = prepared.replace(/-/g, '');
+            const lastComma = prepared.lastIndexOf(',');
+            const lastDot = prepared.lastIndexOf('.');
+            let decimalSeparator = null;
+            if (lastComma !== -1 && lastDot !== -1) {
+                decimalSeparator = lastComma > lastDot ? ',' : '.';
+            } else if (lastComma !== -1) {
+                decimalSeparator = ',';
+            } else if (lastDot !== -1) {
+                const dotCount = (prepared.match(/\./g) || []).length;
+                const digitsAfterDot = prepared.length - lastDot - 1;
+                if (dotCount === 1 && digitsAfterDot > 0 && digitsAfterDot !== 3) decimalSeparator = '.';
+            }
+            if (decimalSeparator) {
+                const separatorPosition = prepared.lastIndexOf(decimalSeparator);
+                prepared = prepared.slice(0, separatorPosition).replace(/\D/g, '') + '.' + prepared.slice(separatorPosition + 1).replace(/\D/g, '');
+            } else {
+                prepared = prepared.replace(/\D/g, '');
+            }
+            const number = Number((negative ? '-' : '') + prepared);
+            return Number.isFinite(number) ? number : null;
+        }
+        function formatQuickResult(value) {
+            return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 10 }).format(value);
+        }
+        async function copyQuickResult() {
+            const number = parseQuickNumber(quickMultiplier.value);
+            if (number === null) {
+                quickCopyStatus.textContent = 'Informe um número válido.';
+                quickCopyStatus.className = 'mt-2 min-h-4 text-xs text-red-300';
+                quickMultiplier.focus();
+                return;
+            }
+            const result = formatQuickResult(number * 1000);
+            try {
+                await navigator.clipboard.writeText(result);
+                quickCopyStatus.textContent = `Copiado: ${result}`;
+                quickCopyStatus.className = 'mt-2 min-h-4 text-xs text-emerald-300';
+            } catch (error) {
+                quickCopyStatus.textContent = 'Não foi possível copiar.';
+                quickCopyStatus.className = 'mt-2 min-h-4 text-xs text-red-300';
+            }
+        }
 
         function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char])); }
         function showNotice(message, type = 'success') { notice.textContent = message; notice.className = `mt-5 rounded-2xl border px-4 py-3 text-sm ${type === 'error' ? 'border-red-500/40 bg-red-950/60 text-red-100' : 'border-emerald-500/40 bg-emerald-950/60 text-emerald-100'}`; }
@@ -329,6 +390,8 @@ try {
         async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; render(); }
         function updatePeriodOptions() { const base = periodBase.value; periodReference.innerHTML = ''; periodReferenceWrap.classList.toggle('hidden', base === 'anual'); const max = base === 'trimestre' ? 4 : 2; for (let i = 1; i <= max; i++) periodReference.insertAdjacentHTML('beforeend', `<option value="${i}">${i}</option>`); }
 
+        quickCopy.addEventListener('click', copyQuickResult);
+        quickMultiplier.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); copyQuickResult(); } });
         document.getElementById('add-indicator').addEventListener('click', () => openModal(indicatorModal));
         document.getElementById('add-reference').addEventListener('click', () => openModal(referenceModal));
         document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', closeModals));
