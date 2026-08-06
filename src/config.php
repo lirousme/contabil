@@ -193,6 +193,16 @@ function ensureResultadosTables(PDO $pdo): void
         )"
     );
 
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS resultados_ocultos (
+            id_empresa INT NOT NULL,
+            tipo ENUM('linha', 'coluna') NOT NULL,
+            chave VARCHAR(32) NOT NULL,
+            PRIMARY KEY (id_empresa, tipo, chave),
+            CONSTRAINT fk_resultados_ocultos_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
+        )"
+    );
+
     $pdo->exec('DROP TABLE IF EXISTS referencias');
 
     ensureIndex($pdo, 'indicadores', 'idx_indicadores_nome', 'CREATE INDEX idx_indicadores_nome ON indicadores (nome)');

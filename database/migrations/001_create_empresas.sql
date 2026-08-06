@@ -38,3 +38,11 @@ CREATE TABLE IF NOT EXISTS comentarios_indicadores (
     CONSTRAINT fk_comentarios_indicadores_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE,
     CONSTRAINT fk_comentarios_indicadores_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS resultados_ocultos (
+    id_empresa INT NOT NULL,
+    tipo ENUM('linha', 'coluna') NOT NULL,
+    chave VARCHAR(32) NOT NULL,
+    PRIMARY KEY (id_empresa, tipo, chave),
+    CONSTRAINT fk_resultados_ocultos_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
+);
