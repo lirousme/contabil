@@ -130,7 +130,9 @@ try {
             $resultadosStmt->execute(['id_empresa' => $empresaId]);
             $comentariosStmt = $pdo->prepare('SELECT id, comentario, id_indicador, id_empresa FROM comentarios_indicadores WHERE id_empresa = :id_empresa');
             $comentariosStmt->execute(['id_empresa' => $empresaId]);
-            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll()]);
+            $ocultosStmt = $pdo->prepare('SELECT tipo, chave FROM resultados_ocultos WHERE id_empresa = :id_empresa');
+            $ocultosStmt->execute(['id_empresa' => $empresaId]);
+            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll(), 'ocultos' => $ocultosStmt->fetchAll()]);
         }
 
         if ($method === 'POST') {
@@ -191,6 +193,29 @@ try {
                 $upsert->execute(['comentario' => $comentario, 'id_indicador' => $indicadorId, 'id_empresa' => $empresaId]);
                 jsonResponse(['message' => 'Comentário salvo.']);
             }
+            if ($action === 'visibilidade') {
+                $tipo = (string) ($data['tipo'] ?? '');
+                $chave = (string) ($data['chave'] ?? '');
+                $oculto = filter_var($data['oculto'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                if ($tipo === 'linha') {
+                    $indicadorId = filter_var($chave, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                    $stmt = $pdo->prepare('SELECT COUNT(*) FROM indicadores WHERE id = :id');
+                    $stmt->execute(['id' => $indicadorId ?: 0]);
+                    if (!$indicadorId || (int) $stmt->fetchColumn() === 0) throw new InvalidArgumentException('Indicador inválido.');
+                    $chave = (string) $indicadorId;
+                } elseif ($tipo === 'coluna') {
+                    if (!in_array($chave, referenciasDisponiveis(), true)) throw new InvalidArgumentException('Referência inválida.');
+                } else {
+                    throw new InvalidArgumentException('Tipo de visibilidade inválido.');
+                }
+                if ($oculto) {
+                    $stmt = $pdo->prepare('INSERT IGNORE INTO resultados_ocultos (id_empresa, tipo, chave) VALUES (:id_empresa, :tipo, :chave)');
+                } else {
+                    $stmt = $pdo->prepare('DELETE FROM resultados_ocultos WHERE id_empresa = :id_empresa AND tipo = :tipo AND chave = :chave');
+                }
+                $stmt->execute(['id_empresa' => $empresaId, 'tipo' => $tipo, 'chave' => $chave]);
+                jsonResponse(['message' => $oculto ? 'Item ocultado.' : 'Item exibido.']);
+            }
         }
         jsonResponse(['error' => 'Método não permitido.'], 405);
     }
@@ -215,6 +240,9 @@ try {
             <a href="index.php" class="rounded-lg px-2 py-2 text-sm font-semibold text-cyan-300 transition hover:bg-slate-800 hover:text-cyan-200" aria-label="Voltar para empresas">← Empresas</a>
             <div class="h-6 w-px bg-slate-700" aria-hidden="true"></div>
             <h1 id="empresa-title" class="min-w-0 flex-1 truncate text-sm font-semibold text-white">Carregando...</h1>
+            <button id="toggle-hidden" type="button" class="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-cyan-500 hover:text-cyan-300" aria-pressed="false" title="Mostrar linhas e colunas ocultas">
+                <span id="toggle-hidden-icon" aria-hidden="true"></span><span class="hidden sm:inline">Ocultos</span>
+            </button>
             <div class="flex items-center gap-2" aria-label="Calculadora rápida">
                 <label for="quick-multiplier" class="hidden text-xs font-semibold uppercase tracking-wider text-cyan-300 sm:block">x 1.000</label>
                 <input id="quick-multiplier" type="text" inputmode="decimal" placeholder="Número × 1.000" class="w-36 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500 sm:w-40" autocomplete="off">
@@ -247,7 +275,7 @@ try {
     <script>
         const empresaId = <?= (int) ($_GET['empresa'] ?? $_GET['id_empresa'] ?? 0) ?>;
         const apiUrl = `<?= e($_SERVER['SCRIPT_NAME'] ?? '/resultados.php') ?>?api=resultados&empresa=${empresaId}`;
-        const state = { indicadores: [], referencias: [], resultados: [], comentarios: [] };
+        const state = { indicadores: [], referencias: [], resultados: [], comentarios: [], ocultos: [], mostrarOcultos: false };
         const notice = document.getElementById('notice');
         const head = document.getElementById('results-head');
         const body = document.getElementById('results-body');
@@ -256,6 +284,11 @@ try {
         const quickMultiplier = document.getElementById('quick-multiplier');
         const quickCopy = document.getElementById('quick-copy');
         const quickCopyStatus = document.getElementById('quick-copy-status');
+        const toggleHidden = document.getElementById('toggle-hidden');
+        const toggleHiddenIcon = document.getElementById('toggle-hidden-icon');
+
+        const eyeOpen = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+        const eyeClosed = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 5.2A11 11 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-2.1 3.2M6.6 6.6C3.6 8.5 2 12 2 12s3.5 7 10 7a10 10 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
 
 
         function parseQuickNumber(value) {
@@ -334,19 +367,44 @@ try {
             return resultado.decimal ?? '';
         }
 
+        function isHidden(tipo, chave) { return state.ocultos.some(item => item.tipo === tipo && String(item.chave) === String(chave)); }
+        function visibilityButton(tipo, chave, hidden, label, extraClass = '') {
+            return `<button type="button" data-visibility-type="${tipo}" data-visibility-key="${escapeHtml(chave)}" data-hidden="${hidden ? 'true' : 'false'}" class="${extraClass} rounded p-1 transition hover:bg-cyan-500/20 hover:text-cyan-300" title="${hidden ? 'Exibir' : 'Ocultar'} ${escapeHtml(label)}" aria-label="${hidden ? 'Exibir' : 'Ocultar'} ${escapeHtml(label)}">${hidden ? eyeClosed : eyeOpen}</button>`;
+        }
+
         function render() {
-            head.innerHTML = `<tr><th class="sticky left-0 z-40 min-w-48 bg-slate-950 px-4 py-3">Indicador</th><th class="min-w-64 px-4 py-3">Descrição</th><th class="min-w-64 px-4 py-3">Comentário</th>${state.referencias.map(ref => `<th class="min-w-32 px-4 py-3 text-center">${escapeHtml(ref)}</th>`).join('')}</tr>`;
+            toggleHiddenIcon.innerHTML = state.mostrarOcultos ? eyeOpen : eyeClosed;
+            toggleHidden.setAttribute('aria-pressed', String(state.mostrarOcultos));
+            toggleHidden.title = state.mostrarOcultos ? 'Ocultar novamente linhas e colunas marcadas' : 'Mostrar linhas e colunas ocultas';
+            const referenciasVisiveis = state.referencias.filter(ref => state.mostrarOcultos || !isHidden('coluna', ref));
+            head.innerHTML = `<tr><th class="sticky left-0 z-40 min-w-48 bg-slate-950 px-4 py-3">Indicador</th><th class="min-w-64 px-4 py-3">Descrição</th><th class="min-w-64 px-4 py-3">Comentário</th>${referenciasVisiveis.map(ref => { const hidden = isHidden('coluna', ref); return `<th class="min-w-32 px-4 py-2 text-center ${hidden ? 'bg-slate-900/80 text-slate-500' : ''}"><div class="flex items-center justify-center gap-1">${escapeHtml(ref)}${visibilityButton('coluna', ref, hidden, `coluna ${ref}`)}</div></th>`; }).join('')}</tr>`;
             if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${3 + state.referencias.length}" class="px-4 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
-            body.innerHTML = state.indicadores.map(indicador => { const comentario = comentarioFor(indicador.id); return `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-20 min-w-48 cursor-cell bg-slate-900 px-4 py-3 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td><td data-comment-indicator="${indicador.id}" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10" title="Clique duas vezes para adicionar ou editar">${escapeHtml(comentario?.comentario || '—')}</td>${state.referencias.map(ref => { const resultado = resultFor(indicador.id, ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell whitespace-nowrap px-4 py-3 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`; }).join('');
+            const indicadoresVisiveis = state.indicadores.filter(indicador => state.mostrarOcultos || !isHidden('linha', indicador.id));
+            body.innerHTML = indicadoresVisiveis.map(indicador => { const comentario = comentarioFor(indicador.id); const hidden = isHidden('linha', indicador.id); return `<tr class="${hidden ? 'bg-slate-950/50 opacity-60' : 'hover:bg-slate-800/50'}"><td data-edit-indicator="${indicador.id}" data-field="nome" class="group relative sticky left-0 z-20 min-w-48 cursor-cell bg-slate-900 px-4 py-3 pr-9 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}${visibilityButton('linha', indicador.id, hidden, `linha ${indicador.nome}`, 'absolute right-1 top-1')}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td><td data-comment-indicator="${indicador.id}" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10" title="Clique duas vezes para adicionar ou editar">${escapeHtml(comentario?.comentario || '—')}</td>${referenciasVisiveis.map(ref => { const resultado = resultFor(indicador.id, ref); const columnHidden = isHidden('coluna', ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell whitespace-nowrap px-4 py-3 text-center text-slate-200 hover:bg-cyan-500/10 ${columnHidden ? 'bg-slate-950/50 opacity-60' : ''}">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`; }).join('');
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
-        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; state.comentarios = data.comentarios; render(); }
+        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; state.comentarios = data.comentarios; state.ocultos = data.ocultos; render(); }
 
         quickCopy.addEventListener('click', copyQuickResult);
         quickMultiplier.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); copyQuickResult(); } });
         document.getElementById('add-indicator').addEventListener('click', () => openModal(indicatorModal));
         document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', closeModals));
+        toggleHidden.addEventListener('click', () => { state.mostrarOcultos = !state.mostrarOcultos; render(); });
+        document.getElementById('results-scroll').addEventListener('click', async event => {
+            const button = event.target.closest('[data-visibility-type][data-visibility-key]');
+            if (!button) return;
+            event.preventDefault();
+            event.stopPropagation();
+            button.disabled = true;
+            try {
+                await request('POST', { action: 'visibilidade', tipo: button.dataset.visibilityType, chave: button.dataset.visibilityKey, oculto: button.dataset.hidden !== 'true' });
+                await load();
+            } catch (error) {
+                showNotice(error.message, 'error');
+                button.disabled = false;
+            }
+        });
 
         document.getElementById('indicator-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'indicador', nome: document.getElementById('indicator-name').value, descricao: document.getElementById('indicator-description').value, formato: document.getElementById('indicator-format').value }); closeModals(); event.target.reset(); showNotice('Indicador cadastrado.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
         function startCellEdit(cell, value, inputType, saveCallback, align = 'text-center') {
@@ -364,6 +422,7 @@ try {
         }
 
         body.addEventListener('dblclick', async event => {
+            if (event.target.closest('[data-visibility-type]')) return;
             const commentCell = event.target.closest('[data-comment-indicator]');
             if (commentCell) {
                 const indicadorId = Number(commentCell.dataset.commentIndicator);
