@@ -180,8 +180,22 @@ function ensureResultadosTables(PDO $pdo): void
         )"
     );
 
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS comentarios_indicadores (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            comentario TEXT NULL DEFAULT NULL,
+            id_indicador INT NOT NULL,
+            id_empresa INT NOT NULL,
+            UNIQUE KEY uniq_comentarios_indicadores_empresa_indicador (id_empresa, id_indicador),
+            INDEX idx_comentarios_indicadores_id_indicador (id_indicador),
+            CONSTRAINT fk_comentarios_indicadores_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE,
+            CONSTRAINT fk_comentarios_indicadores_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
+        )"
+    );
+
     $pdo->exec('DROP TABLE IF EXISTS referencias');
 
     ensureIndex($pdo, 'indicadores', 'idx_indicadores_nome', 'CREATE INDEX idx_indicadores_nome ON indicadores (nome)');
     ensureIndex($pdo, 'resultados', 'idx_resultados_id_indicador', 'CREATE INDEX idx_resultados_id_indicador ON resultados (id_indicador)');
+    ensureIndex($pdo, 'comentarios_indicadores', 'idx_comentarios_indicadores_id_indicador', 'CREATE INDEX idx_comentarios_indicadores_id_indicador ON comentarios_indicadores (id_indicador)');
 }

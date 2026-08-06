@@ -128,7 +128,9 @@ try {
             $referencias = referenciasDisponiveis();
             $resultadosStmt = $pdo->prepare('SELECT id_empresa, id_indicador, referencia, `data`, `decimal`, texto FROM resultados WHERE id_empresa = :id_empresa');
             $resultadosStmt->execute(['id_empresa' => $empresaId]);
-            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll()]);
+            $comentariosStmt = $pdo->prepare('SELECT id, comentario, id_indicador, id_empresa FROM comentarios_indicadores WHERE id_empresa = :id_empresa');
+            $comentariosStmt->execute(['id_empresa' => $empresaId]);
+            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll()]);
         }
 
         if ($method === 'POST') {
@@ -176,6 +178,18 @@ try {
                 $upsert = $pdo->prepare('INSERT INTO resultados (id_empresa, id_indicador, referencia, `data`, `decimal`, texto) VALUES (:id_empresa, :id_indicador, :referencia, :data, :decimal, :texto) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`), `decimal` = VALUES(`decimal`), texto = VALUES(texto)');
                 $upsert->execute(['id_empresa' => $empresaId, 'id_indicador' => $indicadorId, 'referencia' => $referencia, 'data' => $fields['data'], 'decimal' => $fields['decimal'], 'texto' => $fields['texto']]);
                 jsonResponse(['message' => 'Resultado salvo.']);
+            }
+            if ($action === 'comentario') {
+                $indicadorId = (int) ($data['id_indicador'] ?? 0);
+                $comentario = trim((string) ($data['comentario'] ?? ''));
+                $stmt = $pdo->prepare('SELECT COUNT(*) FROM indicadores WHERE id = :id');
+                $stmt->execute(['id' => $indicadorId]);
+                if ($indicadorId <= 0 || (int) $stmt->fetchColumn() === 0) {
+                    throw new InvalidArgumentException('Indicador inválido.');
+                }
+                $upsert = $pdo->prepare('INSERT INTO comentarios_indicadores (comentario, id_indicador, id_empresa) VALUES (:comentario, :id_indicador, :id_empresa) ON DUPLICATE KEY UPDATE comentario = VALUES(comentario)');
+                $upsert->execute(['comentario' => $comentario, 'id_indicador' => $indicadorId, 'id_empresa' => $empresaId]);
+                jsonResponse(['message' => 'Comentário salvo.']);
             }
         }
         jsonResponse(['error' => 'Método não permitido.'], 405);
@@ -233,7 +247,7 @@ try {
     <script>
         const empresaId = <?= (int) ($_GET['empresa'] ?? $_GET['id_empresa'] ?? 0) ?>;
         const apiUrl = `<?= e($_SERVER['SCRIPT_NAME'] ?? '/resultados.php') ?>?api=resultados&empresa=${empresaId}`;
-        const state = { indicadores: [], referencias: [], resultados: [] };
+        const state = { indicadores: [], referencias: [], resultados: [], comentarios: [] };
         const notice = document.getElementById('notice');
         const head = document.getElementById('results-head');
         const body = document.getElementById('results-body');
@@ -297,6 +311,7 @@ try {
         function openModal(modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
         function closeModals() { indicatorModal.classList.add('hidden'); indicatorModal.classList.remove('flex'); }
         function resultFor(indicadorId, referencia) { return state.resultados.find(item => Number(item.id_indicador) === Number(indicadorId) && item.referencia === referencia); }
+        function comentarioFor(indicadorId) { return state.comentarios.find(item => Number(item.id_indicador) === Number(indicadorId)); }
         function formatDecimalValue(value) {
             const number = Number(value);
             return Number.isFinite(number) ? number : null;
@@ -320,13 +335,13 @@ try {
         }
 
         function render() {
-            head.innerHTML = `<tr><th class="sticky left-0 z-40 min-w-48 bg-slate-950 px-4 py-3">Indicador</th><th class="min-w-64 px-4 py-3">Descrição</th>${state.referencias.map(ref => `<th class="min-w-32 px-4 py-3 text-center">${escapeHtml(ref)}</th>`).join('')}</tr>`;
-            if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${2 + state.referencias.length}" class="px-4 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
-            body.innerHTML = state.indicadores.map(indicador => `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-20 min-w-48 cursor-cell bg-slate-900 px-4 py-3 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td>${state.referencias.map(ref => { const resultado = resultFor(indicador.id, ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell whitespace-nowrap px-4 py-3 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`).join('');
+            head.innerHTML = `<tr><th class="sticky left-0 z-40 min-w-48 bg-slate-950 px-4 py-3">Indicador</th><th class="min-w-64 px-4 py-3">Descrição</th><th class="min-w-64 px-4 py-3">Comentário</th>${state.referencias.map(ref => `<th class="min-w-32 px-4 py-3 text-center">${escapeHtml(ref)}</th>`).join('')}</tr>`;
+            if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${3 + state.referencias.length}" class="px-4 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
+            body.innerHTML = state.indicadores.map(indicador => { const comentario = comentarioFor(indicador.id); return `<tr class="hover:bg-slate-800/50"><td data-edit-indicator="${indicador.id}" data-field="nome" class="sticky left-0 z-20 min-w-48 cursor-cell bg-slate-900 px-4 py-3 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td><td data-comment-indicator="${indicador.id}" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10" title="Clique duas vezes para adicionar ou editar">${escapeHtml(comentario?.comentario || '—')}</td>${state.referencias.map(ref => { const resultado = resultFor(indicador.id, ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell whitespace-nowrap px-4 py-3 text-center text-slate-200 hover:bg-cyan-500/10">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`; }).join('');
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
-        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; render(); }
+        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; state.comentarios = data.comentarios; render(); }
 
         quickCopy.addEventListener('click', copyQuickResult);
         quickMultiplier.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); copyQuickResult(); } });
@@ -349,6 +364,13 @@ try {
         }
 
         body.addEventListener('dblclick', async event => {
+            const commentCell = event.target.closest('[data-comment-indicator]');
+            if (commentCell) {
+                const indicadorId = Number(commentCell.dataset.commentIndicator);
+                const comentario = comentarioFor(indicadorId);
+                startCellEdit(commentCell, comentario?.comentario || '', 'textarea', value => request('POST', { action: 'comentario', id_indicador: indicadorId, comentario: value }), 'text-left');
+                return;
+            }
             const indicatorCell = event.target.closest('[data-edit-indicator][data-field]');
             if (indicatorCell) {
                 const indicador = state.indicadores.find(item => Number(item.id) === Number(indicatorCell.dataset.editIndicator));
