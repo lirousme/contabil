@@ -42,6 +42,8 @@ function normalizeCompany(array $company): array
         'nome_da_empresa' => $company['nome_da_empresa'],
         'tickers' => $tickers,
         'cod_cvm' => $company['cod_cvm'] === null ? null : (string) $company['cod_cvm'],
+        'id_setor' => $company['id_setor'] === null ? null : (int) $company['id_setor'],
+        'setor' => $company['setor'] ?? null,
     ];
 }
 
@@ -49,6 +51,7 @@ function validateCompany(array $data): array
 {
     $nome = trim($data['nome_da_empresa'] ?? '');
     $codCvm = trim((string) ($data['cod_cvm'] ?? ''));
+    $setorId = filter_var($data['id_setor'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
 
     if ($nome === '') {
         throw new InvalidArgumentException('Informe o nome da empresa.');
@@ -58,7 +61,11 @@ function validateCompany(array $data): array
         throw new InvalidArgumentException('Informe apenas números no código CVM.');
     }
 
-    return [$nome, $codCvm === '' ? null : $codCvm];
+    if (!$setorId) {
+        throw new InvalidArgumentException('Escolha o setor da empresa.');
+    }
+
+    return [$nome, $codCvm === '' ? null : $codCvm, $setorId];
 }
 
 function validateTickers(array $data): array
@@ -86,6 +93,16 @@ function validateTickers(array $data): array
     }
 
     return $tickers;
+}
+
+function validateSetor(PDO $pdo, int $setorId): void
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM setores WHERE id = :id');
+    $stmt->execute(['id' => $setorId]);
+
+    if ((int) $stmt->fetchColumn() === 0) {
+        throw new InvalidArgumentException('Escolha um setor válido.');
+    }
 }
 
 function replaceTickers(PDO $pdo, int $companyId, array $tickers): void
@@ -117,7 +134,7 @@ if (($_GET['api'] ?? '') === 'empresas') {
                 $params['cod_cvm'] = $search . '%';
             }
 
-            $stmt = $pdo->prepare("SELECT empresas.id, empresas.nome_da_empresa, empresas.cod_cvm,
+            $stmt = $pdo->prepare("SELECT empresas.id, empresas.nome_da_empresa, empresas.cod_cvm, empresas.id_setor, setores.nome AS setor,
                 COALESCE(
                     JSON_ARRAYAGG(
                         CASE WHEN tickers.id IS NULL THEN NULL ELSE JSON_OBJECT('id', tickers.id, 'bolsa', tickers.bolsa, 'ticker', tickers.ticker) END
@@ -125,26 +142,31 @@ if (($_GET['api'] ?? '') === 'empresas') {
                     JSON_ARRAY()
                 ) AS tickers_json
                 FROM empresas
+                LEFT JOIN setores ON setores.id = empresas.id_setor
                 LEFT JOIN tickers ON tickers.id_empresa = empresas.id
                 {$where}
-                GROUP BY empresas.id, empresas.nome_da_empresa, empresas.cod_cvm
+                GROUP BY empresas.id, empresas.nome_da_empresa, empresas.cod_cvm, empresas.id_setor, setores.nome
                 ORDER BY empresas.id DESC
                 LIMIT 100");
             $stmt->execute($params);
 
+            $setoresStmt = $pdo->query('SELECT id, nome FROM setores ORDER BY nome');
+
             jsonResponse([
                 'empresas' => array_map('normalizeCompany', $stmt->fetchAll()),
+                'setores' => $setoresStmt->fetchAll(),
             ]);
         }
 
         $data = payload();
 
         if ($method === 'POST') {
-            [$nome, $codCvm] = validateCompany($data);
+            [$nome, $codCvm, $setorId] = validateCompany($data);
             $tickers = validateTickers($data);
+            validateSetor($pdo, $setorId);
             $pdo->beginTransaction();
-            $stmt = $pdo->prepare('INSERT INTO empresas (nome_da_empresa, cod_cvm) VALUES (:nome_da_empresa, :cod_cvm)');
-            $stmt->execute(['nome_da_empresa' => $nome, 'cod_cvm' => $codCvm]);
+            $stmt = $pdo->prepare('INSERT INTO empresas (nome_da_empresa, cod_cvm, id_setor) VALUES (:nome_da_empresa, :cod_cvm, :id_setor)');
+            $stmt->execute(['nome_da_empresa' => $nome, 'cod_cvm' => $codCvm, 'id_setor' => $setorId]);
             $companyId = (int) $pdo->lastInsertId();
             replaceTickers($pdo, $companyId, $tickers);
             $pdo->commit();
@@ -152,12 +174,13 @@ if (($_GET['api'] ?? '') === 'empresas') {
         }
 
         if ($method === 'PUT') {
-            [$nome, $codCvm] = validateCompany($data);
+            [$nome, $codCvm, $setorId] = validateCompany($data);
             $tickers = validateTickers($data);
+            validateSetor($pdo, $setorId);
             $companyId = (int) ($data['id'] ?? 0);
             $pdo->beginTransaction();
-            $stmt = $pdo->prepare('UPDATE empresas SET nome_da_empresa = :nome_da_empresa, cod_cvm = :cod_cvm WHERE id = :id');
-            $stmt->execute(['nome_da_empresa' => $nome, 'cod_cvm' => $codCvm, 'id' => $companyId]);
+            $stmt = $pdo->prepare('UPDATE empresas SET nome_da_empresa = :nome_da_empresa, cod_cvm = :cod_cvm, id_setor = :id_setor WHERE id = :id');
+            $stmt->execute(['nome_da_empresa' => $nome, 'cod_cvm' => $codCvm, 'id_setor' => $setorId, 'id' => $companyId]);
             replaceTickers($pdo, $companyId, $tickers);
             $pdo->commit();
             jsonResponse(['message' => 'Empresa atualizada.']);
@@ -211,7 +234,9 @@ if (($_GET['api'] ?? '') === 'empresas') {
 
             <div id="notice" class="mb-5 hidden rounded-2xl border px-4 py-3 text-sm"></div>
 
-            <form id="company-form" class="grid gap-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-5 md:grid-cols-[1fr_220px_auto] md:items-end">
+            <button id="toggle-company-form" type="button" class="mb-4 flex w-full items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/70 px-5 py-4 text-left font-semibold text-white transition hover:border-cyan-500/60" aria-expanded="false" aria-controls="company-form-panel"><span id="company-form-title">Cadastrar empresa</span><span id="company-form-icon" class="text-cyan-300">+</span></button>
+            <div id="company-form-panel" class="hidden">
+            <form id="company-form" class="grid gap-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-5 md:grid-cols-[1fr_220px_220px_auto] md:items-end">
                 <input id="company-id" type="hidden">
                 <label class="block">
                     <span class="mb-2 block text-sm font-medium text-slate-300">Nome da empresa</span>
@@ -221,11 +246,15 @@ if (($_GET['api'] ?? '') === 'empresas') {
                     <span class="mb-2 block text-sm font-medium text-slate-300">Código CVM</span>
                     <input id="cod-cvm" inputmode="numeric" pattern="[0-9]*" class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none ring-cyan-500 transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2" placeholder="Opcional">
                 </label>
+                <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-slate-300">Setor</span>
+                    <select id="id-setor" required class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none ring-cyan-500 transition focus:border-cyan-400 focus:ring-2"></select>
+                </label>
                 <div class="flex gap-3">
                     <button id="submit-button" class="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400">Cadastrar</button>
                     <button id="cancel-button" type="button" class="hidden rounded-xl border border-slate-700 px-5 py-3 font-semibold text-slate-200 transition hover:bg-slate-800">Cancelar</button>
                 </div>
-                <fieldset class="md:col-span-3 rounded-2xl border border-slate-800 p-4">
+                <fieldset class="md:col-span-4 rounded-2xl border border-slate-800 p-4">
                     <legend class="px-2 text-sm font-medium text-slate-300">Tickers</legend>
                     <div class="grid gap-3 md:grid-cols-[160px_1fr_auto] md:items-end">
                         <label class="block">
@@ -245,6 +274,7 @@ if (($_GET['api'] ?? '') === 'empresas') {
                     <div id="tickers-list" class="mt-3 flex flex-wrap gap-2 text-sm text-slate-300"></div>
                 </fieldset>
             </form>
+            </div>
         </section>
 
         <section class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/80 shadow-2xl shadow-slate-950/40">
@@ -254,12 +284,13 @@ if (($_GET['api'] ?? '') === 'empresas') {
                         <tr>
                             <th class="px-6 py-4">Nome da empresa</th>
                             <th class="px-6 py-4">Tickers BVMF</th>
+                            <th class="px-6 py-4">Setor</th>
                             <th class="px-6 py-4">Código CVM</th>
                             <th class="px-6 py-4 text-right">Ações</th>
                         </tr>
                     </thead>
                     <tbody id="companies-body" class="divide-y divide-slate-800 text-sm">
-                        <tr><td colspan="4" class="px-6 py-10 text-center text-slate-400">Carregando...</td></tr>
+                        <tr><td colspan="5" class="px-6 py-10 text-center text-slate-400">Carregando...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -268,13 +299,18 @@ if (($_GET['api'] ?? '') === 'empresas') {
 
     <script>
         const apiUrl = '<?= e($_SERVER['SCRIPT_NAME'] ?? '/index.php') ?>?api=empresas';
-        const state = { empresas: [], q: '', timer: null, tickers: [] };
+        const state = { empresas: [], setores: [], q: '', timer: null, tickers: [] };
         const form = document.getElementById('company-form');
         const notice = document.getElementById('notice');
         const tbody = document.getElementById('companies-body');
         const idInput = document.getElementById('company-id');
         const nomeInput = document.getElementById('nome-da-empresa');
         const codCvmInput = document.getElementById('cod-cvm');
+        const setorInput = document.getElementById('id-setor');
+        const formPanel = document.getElementById('company-form-panel');
+        const toggleCompanyForm = document.getElementById('toggle-company-form');
+        const companyFormIcon = document.getElementById('company-form-icon');
+        const companyFormTitle = document.getElementById('company-form-title');
         const submitButton = document.getElementById('submit-button');
         const cancelButton = document.getElementById('cancel-button');
         const searchInput = document.getElementById('search');
@@ -292,6 +328,16 @@ if (($_GET['api'] ?? '') === 'empresas') {
             notice.className = `mb-5 rounded-2xl border px-4 py-3 text-sm ${type === 'error' ? 'border-red-500/40 bg-red-950/60 text-red-100' : 'border-emerald-500/40 bg-emerald-950/60 text-emerald-100'}`;
         }
 
+        function setFormOpen(open) {
+            formPanel.classList.toggle('hidden', !open);
+            toggleCompanyForm.setAttribute('aria-expanded', String(open));
+            companyFormIcon.textContent = open ? '−' : '+';
+        }
+
+        function renderSetores() {
+            setorInput.innerHTML = '<option value="">Selecione um setor</option>' + state.setores.map(setor => `<option value="${escapeHtml(setor.id)}">${escapeHtml(setor.nome)}</option>`).join('');
+        }
+
         function renderTickersList() {
             tickersList.innerHTML = state.tickers.length ? state.tickers.map((item, index) => `
                 <span class="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1">
@@ -307,11 +353,13 @@ if (($_GET['api'] ?? '') === 'empresas') {
             renderTickersList();
             submitButton.textContent = 'Cadastrar';
             cancelButton.classList.add('hidden');
+            companyFormTitle.textContent = 'Cadastrar empresa';
+            setFormOpen(false);
         }
 
         function render() {
             if (!state.empresas.length) {
-                tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-slate-400">Nenhuma empresa encontrada.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-10 text-center text-slate-400">Nenhuma empresa encontrada.</td></tr>';
                 return;
             }
 
@@ -322,6 +370,7 @@ if (($_GET['api'] ?? '') === 'empresas') {
                 <tr class="hover:bg-slate-800/50">
                     <td class="px-6 py-4 font-medium text-white"><a class="text-cyan-300 transition hover:text-cyan-200 hover:underline" href="resultados.php?empresa=${company.id}">${escapeHtml(company.nome_da_empresa)}</a></td>
                     <td class="px-6 py-4 text-slate-300">${escapeHtml(bvmfTickers)}</td>
+                    <td class="px-6 py-4 text-slate-300">${escapeHtml(company.setor || '—')}</td>
                     <td class="px-6 py-4 text-slate-300">${company.cod_cvm ?? '—'}</td>
                     <td class="px-6 py-4">
                         <div class="flex justify-end gap-3">
@@ -347,6 +396,8 @@ if (($_GET['api'] ?? '') === 'empresas') {
         async function loadCompanies() {
             const data = await request();
             state.empresas = data.empresas;
+            state.setores = data.setores || [];
+            renderSetores();
             render();
         }
 
@@ -354,7 +405,7 @@ if (($_GET['api'] ?? '') === 'empresas') {
             event.preventDefault();
             try {
                 const id = idInput.value;
-                const body = { id, nome_da_empresa: nomeInput.value, cod_cvm: codCvmInput.value, tickers: state.tickers };
+                const body = { id, nome_da_empresa: nomeInput.value, cod_cvm: codCvmInput.value, id_setor: setorInput.value, tickers: state.tickers };
                 const data = await request(id ? 'PUT' : 'POST', body);
                 showNotice(data.message);
                 resetForm();
@@ -374,10 +425,13 @@ if (($_GET['api'] ?? '') === 'empresas') {
                 idInput.value = company.id;
                 nomeInput.value = company.nome_da_empresa;
                 codCvmInput.value = company.cod_cvm ?? '';
+                setorInput.value = company.id_setor ?? '';
                 state.tickers = (company.tickers || []).map(item => ({ bolsa: item.bolsa, ticker: item.ticker }));
                 renderTickersList();
                 submitButton.textContent = 'Salvar';
                 cancelButton.classList.remove('hidden');
+                companyFormTitle.textContent = `Editando: ${company.nome_da_empresa}`;
+                setFormOpen(true);
                 nomeInput.focus();
             }
 
@@ -415,6 +469,7 @@ if (($_GET['api'] ?? '') === 'empresas') {
             renderTickersList();
         });
 
+        toggleCompanyForm.addEventListener('click', () => setFormOpen(formPanel.classList.contains('hidden')));
         cancelButton.addEventListener('click', resetForm);
         searchInput.addEventListener('input', () => {
             clearTimeout(state.timer);

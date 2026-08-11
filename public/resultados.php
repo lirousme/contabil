@@ -36,11 +36,22 @@ function referenciasDisponiveis(): array
     return $referencias;
 }
 
+function validateSetor(PDO $pdo, int $setorId): void
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM setores WHERE id = :id');
+    $stmt->execute(['id' => $setorId]);
+
+    if ((int) $stmt->fetchColumn() === 0) {
+        throw new InvalidArgumentException('Escolha um setor válido.');
+    }
+}
+
 function validateIndicador(array $data): array
 {
     $nome = trim($data['nome'] ?? '');
     $descricao = trim($data['descricao'] ?? '');
     $formato = trim($data['formato'] ?? '');
+    $setorId = filter_var($data['id_setor'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
     $formatos = ['Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto'];
     if ($nome === '') {
         throw new InvalidArgumentException('Informe o nome do indicador.');
@@ -48,8 +59,11 @@ function validateIndicador(array $data): array
     if (!in_array($formato, $formatos, true)) {
         throw new InvalidArgumentException('Escolha um formato válido.');
     }
+    if (!$setorId) {
+        throw new InvalidArgumentException('Escolha o setor do indicador.');
+    }
     $respostasPreDefinidas = (int) ($data['respostas_pre_definidas'] ?? 0) === 1 ? 1 : 0;
-    return [$nome, $descricao, $formato, $respostasPreDefinidas];
+    return [$nome, $descricao, $formato, $respostasPreDefinidas, $setorId];
 }
 
 
@@ -138,20 +152,17 @@ try {
             $respostasStmt = $pdo->prepare('SELECT respostas_pre_definidas.id, respostas_pre_definidas.id_indicador, respostas_pre_definidas.texto, respostas_pre_definidas.ponto FROM respostas_pre_definidas INNER JOIN indicadores ON indicadores.id = respostas_pre_definidas.id_indicador WHERE indicadores.id_setor <=> :id_setor ORDER BY respostas_pre_definidas.id_indicador, respostas_pre_definidas.texto');
             $respostasStmt->execute(['id_setor' => $empresa['id_setor']]);
             $respostasPreDefinidas = $respostasStmt->fetchAll();
-            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll(), 'ocultos' => $ocultosStmt->fetchAll(), 'respostas_pre_definidas' => $respostasPreDefinidas]);
+            $setoresStmt = $pdo->query('SELECT id, nome FROM setores ORDER BY nome');
+            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll(), 'ocultos' => $ocultosStmt->fetchAll(), 'respostas_pre_definidas' => $respostasPreDefinidas, 'setores' => $setoresStmt->fetchAll()]);
         }
 
         if ($method === 'POST') {
             $action = $data['action'] ?? '';
             if ($action === 'indicador') {
-                [$nome, $descricao, $formato, $respostasPreDefinidas] = validateIndicador($data);
-                $empresaSetorStmt = $pdo->prepare('SELECT id_setor FROM empresas WHERE id = :id');
-                $empresaSetorStmt->execute(['id' => $empresaId]);
-                $empresaSetorRow = $empresaSetorStmt->fetch();
-                if (!$empresaSetorRow) throw new InvalidArgumentException('Empresa inválida.');
-                $empresaSetor = $empresaSetorRow['id_setor'];
+                [$nome, $descricao, $formato, $respostasPreDefinidas, $setorId] = validateIndicador($data);
+                validateSetor($pdo, $setorId);
                 $stmt = $pdo->prepare('INSERT INTO indicadores (nome, descricao, formato, respostas_pre_definidas, id_setor) VALUES (:nome, :descricao, :formato, :respostas_pre_definidas, :id_setor)');
-                $stmt->execute(['nome' => $nome, 'descricao' => $descricao, 'formato' => $formato, 'respostas_pre_definidas' => $respostasPreDefinidas, 'id_setor' => $empresaSetor]);
+                $stmt->execute(['nome' => $nome, 'descricao' => $descricao, 'formato' => $formato, 'respostas_pre_definidas' => $respostasPreDefinidas, 'id_setor' => $setorId]);
                 jsonResponse(['message' => 'Indicador cadastrado.'], 201);
             }
             if ($action === 'indicador_update') {
@@ -322,6 +333,7 @@ try {
             <h2 class="text-xl font-bold text-white">Novo indicador</h2>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Nome</span><input id="indicator-name" required class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"></label>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Descrição</span><textarea id="indicator-description" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"></textarea></label>
+            <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Setor</span><select id="indicator-sector" required class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"></select></label>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Formato</span><select id="indicator-format" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"><option>Moeda</option><option>Porcentagem</option><option>Número Inteiro</option><option>Data</option><option>Texto</option></select></label>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Tipo de resposta</span><select id="indicator-response-type" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"><option value="0" selected>Resposta aberta</option><option value="1">Respostas pré-definidas</option></select></label>
             <div class="mt-6 flex justify-end gap-3"><button type="button" data-close class="rounded-xl border border-slate-700 px-5 py-3 font-semibold text-slate-200 hover:bg-slate-800">Cancelar</button><button class="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Salvar</button></div>
@@ -331,7 +343,7 @@ try {
     <script>
         const empresaId = <?= (int) ($_GET['empresa'] ?? $_GET['id_empresa'] ?? 0) ?>;
         const apiUrl = `<?= e($_SERVER['SCRIPT_NAME'] ?? '/resultados.php') ?>?api=resultados&empresa=${empresaId}`;
-        const state = { indicadores: [], referencias: [], resultados: [], comentarios: [], ocultos: [], respostasPreDefinidas: [], mostrarOcultos: false, colunaIndicadoresRecolhida: false };
+        const state = { empresa: null, indicadores: [], referencias: [], resultados: [], comentarios: [], ocultos: [], respostasPreDefinidas: [], setores: [], mostrarOcultos: false, colunaIndicadoresRecolhida: false };
         const notice = document.getElementById('notice');
         const head = document.getElementById('results-head');
         const body = document.getElementById('results-body');
@@ -347,6 +359,7 @@ try {
         const toggleHidden = document.getElementById('toggle-hidden');
         const toggleHiddenIcon = document.getElementById('toggle-hidden-icon');
         const toggleIndicatorColumn = document.getElementById('toggle-indicator-column');
+        const indicatorSector = document.getElementById('indicator-sector');
         let longPressTimer = null;
         let longPressPointerId = null;
         let longPressTriggered = false;
@@ -354,6 +367,11 @@ try {
         const eyeOpen = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
         const eyeClosed = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 5.2A11 11 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-2.1 3.2M6.6 6.6C3.6 8.5 2 12 2 12s3.5 7 10 7a10 10 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
 
+
+        function renderSetores() {
+            indicatorSector.innerHTML = '<option value="">Selecione um setor</option>' + state.setores.map(setor => `<option value="${escapeHtml(setor.id)}">${escapeHtml(setor.nome)}</option>`).join('');
+            indicatorSector.value = state.empresa?.id_setor ?? '';
+        }
 
         function parseQuickNumber(value) {
             const normalized = String(value ?? '').trim().replace(/\s/g, '');
@@ -478,11 +496,11 @@ try {
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
-        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; state.comentarios = data.comentarios; state.ocultos = data.ocultos; state.respostasPreDefinidas = data.respostas_pre_definidas || []; render(); }
+        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.empresa = data.empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; state.comentarios = data.comentarios; state.ocultos = data.ocultos; state.respostasPreDefinidas = data.respostas_pre_definidas || []; state.setores = data.setores || []; renderSetores(); render(); }
 
         quickCopy.addEventListener('click', copyQuickResult);
         quickMultiplier.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); copyQuickResult(); } });
-        document.getElementById('add-indicator').addEventListener('click', () => openModal(indicatorModal));
+        document.getElementById('add-indicator').addEventListener('click', () => { renderSetores(); openModal(indicatorModal); });
         document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', closeModals));
         toggleHidden.addEventListener('click', () => { state.mostrarOcultos = !state.mostrarOcultos; render(); });
         toggleIndicatorColumn.addEventListener('click', () => { state.colunaIndicadoresRecolhida = !state.colunaIndicadoresRecolhida; render(); });
@@ -501,7 +519,7 @@ try {
             }
         });
 
-        document.getElementById('indicator-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'indicador', nome: document.getElementById('indicator-name').value, descricao: document.getElementById('indicator-description').value, formato: document.getElementById('indicator-format').value, respostas_pre_definidas: document.getElementById('indicator-response-type').value }); closeModals(); event.target.reset(); showNotice('Indicador cadastrado.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
+        document.getElementById('indicator-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'indicador', nome: document.getElementById('indicator-name').value, descricao: document.getElementById('indicator-description').value, formato: document.getElementById('indicator-format').value, respostas_pre_definidas: document.getElementById('indicator-response-type').value, id_setor: indicatorSector.value }); closeModals(); event.target.reset(); renderSetores(); showNotice('Indicador cadastrado.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
         function renderResponsesModal(indicador) {
             responsesIndicatorName.textContent = indicador.nome;
             responsesList.innerHTML = respostasFor(indicador.id).map(resposta => `<div class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3"><div><p class="font-semibold text-white">${escapeHtml(resposta.texto)}</p><p class="text-sm text-slate-400">Ponto: ${escapeHtml(resposta.ponto ?? 0)}</p></div><button type="button" data-delete-response="${resposta.id}" class="rounded-lg border border-red-500/50 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-red-950">Remover</button></div>`).join('') || '<p class="rounded-xl border border-slate-800 bg-slate-950 px-4 py-6 text-center text-slate-400">Nenhuma resposta cadastrada.</p>';
