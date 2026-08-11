@@ -338,6 +338,9 @@ try {
         const toggleHidden = document.getElementById('toggle-hidden');
         const toggleHiddenIcon = document.getElementById('toggle-hidden-icon');
         const toggleIndicatorColumn = document.getElementById('toggle-indicator-column');
+        let longPressTimer = null;
+        let longPressPointerId = null;
+        let longPressTriggered = false;
 
         const eyeOpen = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
         const eyeClosed = '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m3 3 18 18"/><path d="M10.6 5.2A11 11 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-2.1 3.2M6.6 6.6C3.6 8.5 2 12 2 12s3.5 7 10 7a10 10 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
@@ -495,6 +498,18 @@ try {
             responsesList.innerHTML = respostasFor(indicador.id).map(resposta => `<div class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3"><div><p class="font-semibold text-white">${escapeHtml(resposta.texto)}</p><p class="text-sm text-slate-400">Ponto: ${escapeHtml(resposta.ponto ?? 0)}</p></div><button type="button" data-delete-response="${resposta.id}" class="rounded-lg border border-red-500/50 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-red-950">Remover</button></div>`).join('') || '<p class="rounded-xl border border-slate-800 bg-slate-950 px-4 py-6 text-center text-slate-400">Nenhuma resposta cadastrada.</p>';
         }
         function openResponsesModal(indicador) { activeResponsesIndicatorId = Number(indicador.id); renderResponsesModal(indicador); openModal(responsesModal); }
+        function predefinedIndicatorFromNameCell(cell) {
+            if (!cell) return null;
+            const indicador = state.indicadores.find(item => Number(item.id) === Number(cell.dataset.editIndicator));
+            return indicador && hasPredefinedResponses(indicador) ? indicador : null;
+        }
+        function clearLongPressTimer() {
+            if (longPressTimer !== null) {
+                window.clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            longPressPointerId = null;
+        }
 
         function startSelectEdit(cell, value, options, saveCallback) {
             if (cell.querySelector('select')) return;
@@ -527,11 +542,40 @@ try {
         body.addEventListener('contextmenu', event => {
             const indicatorCell = event.target.closest('[data-edit-indicator][data-field="nome"]');
             if (!indicatorCell || event.target.closest('[data-visibility-type]')) return;
-            const indicador = state.indicadores.find(item => Number(item.id) === Number(indicatorCell.dataset.editIndicator));
-            if (!indicador || !hasPredefinedResponses(indicador)) return;
+            const indicador = predefinedIndicatorFromNameCell(indicatorCell);
+            if (!indicador) return;
             event.preventDefault();
             openResponsesModal(indicador);
         });
+        body.addEventListener('pointerdown', event => {
+            if (event.pointerType === 'mouse' || event.target.closest('[data-visibility-type]')) return;
+            const indicatorCell = event.target.closest('[data-edit-indicator][data-field="nome"]');
+            const indicador = predefinedIndicatorFromNameCell(indicatorCell);
+            if (!indicador) return;
+            clearLongPressTimer();
+            longPressPointerId = event.pointerId;
+            longPressTriggered = false;
+            longPressTimer = window.setTimeout(() => {
+                longPressTimer = null;
+                longPressTriggered = true;
+                openResponsesModal(indicador);
+            }, 2000);
+        });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(eventName => {
+            body.addEventListener(eventName, event => {
+                if (longPressPointerId !== null && event.pointerId !== longPressPointerId) return;
+                clearLongPressTimer();
+            });
+        });
+        body.addEventListener('pointermove', event => {
+            if (longPressPointerId !== null && event.pointerId === longPressPointerId) clearLongPressTimer();
+        });
+        body.addEventListener('click', event => {
+            if (!longPressTriggered) return;
+            event.preventDefault();
+            event.stopPropagation();
+            longPressTriggered = false;
+        }, true);
 
         document.getElementById('responses-form').addEventListener('submit', async event => {
             event.preventDefault();
