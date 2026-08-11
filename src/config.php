@@ -195,10 +195,14 @@ function ensureResultadosTables(PDO $pdo): void
             id INT AUTO_INCREMENT PRIMARY KEY,
             id_indicador INT NOT NULL,
             texto VARCHAR(255) NOT NULL,
+            ponto INT NOT NULL DEFAULT 0,
             INDEX idx_respostas_pre_definidas_id_indicador (id_indicador),
             CONSTRAINT fk_respostas_pre_definidas_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
         )"
     );
+    if (!tableHasColumn($pdo, 'respostas_pre_definidas', 'ponto')) {
+        $pdo->exec('ALTER TABLE respostas_pre_definidas ADD ponto INT NOT NULL DEFAULT 0');
+    }
 
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS comentarios_indicadores (
@@ -222,6 +226,7 @@ function ensureResultadosTables(PDO $pdo): void
             CONSTRAINT fk_resultados_ocultos_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE
         )"
     );
+    $pdo->exec("ALTER TABLE resultados_ocultos MODIFY tipo ENUM('linha', 'coluna') NOT NULL");
 
     $pdo->exec('DROP TABLE IF EXISTS referencias');
 

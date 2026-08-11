@@ -133,7 +133,7 @@ try {
             $comentariosStmt->execute(['id_empresa' => $empresaId]);
             $ocultosStmt = $pdo->prepare('SELECT tipo, chave FROM resultados_ocultos WHERE id_empresa = :id_empresa');
             $ocultosStmt->execute(['id_empresa' => $empresaId]);
-            $respostasPreDefinidas = $pdo->query('SELECT id, id_indicador, texto FROM respostas_pre_definidas ORDER BY id_indicador, texto')->fetchAll();
+            $respostasPreDefinidas = $pdo->query('SELECT id, id_indicador, texto, ponto FROM respostas_pre_definidas ORDER BY id_indicador, texto')->fetchAll();
             jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll(), 'ocultos' => $ocultosStmt->fetchAll(), 'respostas_pre_definidas' => $respostasPreDefinidas]);
         }
 
@@ -191,6 +191,29 @@ try {
                 $upsert->execute(['id_empresa' => $empresaId, 'id_indicador' => $indicadorId, 'referencia' => $referencia, 'data' => $fields['data'], 'decimal' => $fields['decimal'], 'texto' => $fields['texto'], 'id_resposta_definida' => $fields['id_resposta_definida']]);
                 jsonResponse(['message' => 'Resultado salvo.']);
             }
+            if ($action === 'resposta_pre_definida_add') {
+                $indicadorId = (int) ($data['id_indicador'] ?? 0);
+                $texto = trim((string) ($data['texto'] ?? ''));
+                $ponto = filter_var($data['ponto'] ?? null, FILTER_VALIDATE_INT);
+                $stmt = $pdo->prepare('SELECT respostas_pre_definidas FROM indicadores WHERE id = :id');
+                $stmt->execute(['id' => $indicadorId]);
+                $indicadorResposta = $stmt->fetch();
+                if ($indicadorId <= 0 || !$indicadorResposta || (int) $indicadorResposta['respostas_pre_definidas'] !== 1) {
+                    throw new InvalidArgumentException('Indicador sem respostas pré-definidas.');
+                }
+                if ($texto === '') throw new InvalidArgumentException('Informe o texto da resposta.');
+                if ($ponto === false) throw new InvalidArgumentException('Informe uma pontuação inteira.');
+                $stmt = $pdo->prepare('INSERT INTO respostas_pre_definidas (id_indicador, texto, ponto) VALUES (:id_indicador, :texto, :ponto)');
+                $stmt->execute(['id_indicador' => $indicadorId, 'texto' => $texto, 'ponto' => $ponto]);
+                jsonResponse(['message' => 'Resposta pré-definida cadastrada.'], 201);
+            }
+            if ($action === 'resposta_pre_definida_delete') {
+                $respostaId = (int) ($data['id'] ?? 0);
+                $stmt = $pdo->prepare('DELETE FROM respostas_pre_definidas WHERE id = :id');
+                $stmt->execute(['id' => $respostaId]);
+                if ($respostaId <= 0 || $stmt->rowCount() === 0) throw new InvalidArgumentException('Resposta pré-definida inválida.');
+                jsonResponse(['message' => 'Resposta pré-definida removida.']);
+            }
             if ($action === 'comentario') {
                 $indicadorId = (int) ($data['id_indicador'] ?? 0);
                 $comentario = trim((string) ($data['comentario'] ?? ''));
@@ -214,7 +237,7 @@ try {
                     if (!$indicadorId || (int) $stmt->fetchColumn() === 0) throw new InvalidArgumentException('Indicador inválido.');
                     $chave = (string) $indicadorId;
                 } elseif ($tipo === 'coluna') {
-                    if (!in_array($chave, referenciasDisponiveis(), true)) throw new InvalidArgumentException('Referência inválida.');
+                    if (!in_array($chave, referenciasDisponiveis(), true) && !in_array($chave, ['descricao', 'comentario'], true)) throw new InvalidArgumentException('Coluna inválida.');
                 } else {
                     throw new InvalidArgumentException('Tipo de visibilidade inválido.');
                 }
@@ -272,6 +295,18 @@ try {
         </section>
     </main>
 
+    <div id="responses-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 p-4">
+        <div class="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+            <div class="flex items-start justify-between gap-4"><div><h2 class="text-xl font-bold text-white">Respostas possíveis</h2><p id="responses-indicator-name" class="mt-1 text-sm text-slate-400"></p></div><button type="button" data-close class="rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800">Fechar</button></div>
+            <div id="responses-list" class="mt-5 space-y-2"></div>
+            <form id="responses-form" class="mt-5 grid gap-3 sm:grid-cols-[1fr_8rem_auto]">
+                <input id="response-text" required placeholder="Nova resposta" class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500">
+                <input id="response-point" required type="number" step="1" placeholder="Ponto" class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500">
+                <button class="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Adicionar</button>
+            </form>
+        </div>
+    </div>
+
     <div id="indicator-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 p-4">
         <form id="indicator-form" class="w-full max-w-lg rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
             <h2 class="text-xl font-bold text-white">Novo indicador</h2>
@@ -292,6 +327,10 @@ try {
         const body = document.getElementById('results-body');
         const empresaTitle = document.getElementById('empresa-title');
         const indicatorModal = document.getElementById('indicator-modal');
+        const responsesModal = document.getElementById('responses-modal');
+        const responsesList = document.getElementById('responses-list');
+        const responsesIndicatorName = document.getElementById('responses-indicator-name');
+        let activeResponsesIndicatorId = null;
         const quickMultiplier = document.getElementById('quick-multiplier');
         const quickCopy = document.getElementById('quick-copy');
         const quickCopyStatus = document.getElementById('quick-copy-status');
@@ -353,11 +392,12 @@ try {
         function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char])); }
         function showNotice(message, type = 'success') { notice.textContent = message; notice.className = `basis-full rounded-lg border px-3 py-2 text-sm ${type === 'error' ? 'border-red-500/40 bg-red-950/60 text-red-100' : 'border-emerald-500/40 bg-emerald-950/60 text-emerald-100'}`; }
         function openModal(modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
-        function closeModals() { indicatorModal.classList.add('hidden'); indicatorModal.classList.remove('flex'); }
+        function closeModals() { [indicatorModal, responsesModal].forEach(modal => { modal.classList.add('hidden'); modal.classList.remove('flex'); }); activeResponsesIndicatorId = null; }
         function resultFor(indicadorId, referencia) { return state.resultados.find(item => Number(item.id_indicador) === Number(indicadorId) && item.referencia === referencia); }
         function comentarioFor(indicadorId) { return state.comentarios.find(item => Number(item.id_indicador) === Number(indicadorId)); }
         function respostasFor(indicadorId) { return state.respostasPreDefinidas.filter(item => Number(item.id_indicador) === Number(indicadorId)); }
         function respostaFor(id) { return state.respostasPreDefinidas.find(item => Number(item.id) === Number(id)); }
+        function respostaPonto(id) { const ponto = Number(respostaFor(id)?.ponto); return Number.isFinite(ponto) ? ponto : 0; }
         function hasPredefinedResponses(indicador) { return Number(indicador.respostas_pre_definidas) === 1; }
         function formatDecimalValue(value) {
             const number = Number(value);
@@ -384,6 +424,21 @@ try {
         }
 
         function isHidden(tipo, chave) { return state.ocultos.some(item => item.tipo === tipo && String(item.chave) === String(chave)); }
+        function visibleColumns() { return ['descricao', 'comentario'].filter(col => state.mostrarOcultos || !isHidden('coluna', col)); }
+        function visibleReferences() { return state.referencias.filter(ref => state.mostrarOcultos || !isHidden('coluna', ref)); }
+        function scoreForReference(ref, indicadoresVisiveis) {
+            let total = 0;
+            let score = 0;
+            indicadoresVisiveis.filter(hasPredefinedResponses).forEach(indicador => {
+                const respostas = respostasFor(indicador.id);
+                if (!respostas.length) return;
+                const max = Math.max(...respostas.map(item => Number(item.ponto) || 0));
+                total += max;
+                score += respostaPonto(resultFor(indicador.id, ref)?.id_resposta_definida);
+            });
+            const percent = total !== 0 ? (score / total) * 100 : 0;
+            return { score, total, percent };
+        }
         function visibilityButton(tipo, chave, hidden, label, extraClass = '') {
             return `<button type="button" data-visibility-type="${tipo}" data-visibility-key="${escapeHtml(chave)}" data-hidden="${hidden ? 'true' : 'false'}" class="${extraClass} rounded p-1 transition hover:bg-cyan-500/20 hover:text-cyan-300" title="${hidden ? 'Exibir' : 'Ocultar'} ${escapeHtml(label)}" aria-label="${hidden ? 'Exibir' : 'Ocultar'} ${escapeHtml(label)}">${hidden ? eyeClosed : eyeOpen}</button>`;
         }
@@ -392,11 +447,14 @@ try {
             toggleHiddenIcon.innerHTML = state.mostrarOcultos ? eyeOpen : eyeClosed;
             toggleHidden.setAttribute('aria-pressed', String(state.mostrarOcultos));
             toggleHidden.title = state.mostrarOcultos ? 'Ocultar novamente linhas e colunas marcadas' : 'Mostrar linhas e colunas ocultas';
-            const referenciasVisiveis = state.referencias.filter(ref => state.mostrarOcultos || !isHidden('coluna', ref));
-            head.innerHTML = `<tr><th class="sticky left-0 z-40 min-w-48 bg-slate-950 px-4 py-3">Indicador</th><th class="min-w-64 px-4 py-3">Descrição</th><th class="min-w-64 px-4 py-3">Comentário</th>${referenciasVisiveis.map(ref => { const hidden = isHidden('coluna', ref); return `<th class="min-w-32 px-4 py-2 text-center ${hidden ? 'bg-slate-900/80 text-slate-500' : ''}"><div class="flex items-center justify-center gap-1">${escapeHtml(ref)}${visibilityButton('coluna', ref, hidden, `coluna ${ref}`)}</div></th>`; }).join('')}</tr>`;
-            if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${3 + state.referencias.length}" class="px-4 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
+            const referenciasVisiveis = visibleReferences();
+            const colunasTextoVisiveis = visibleColumns();
+            const textoHeaders = colunasTextoVisiveis.map(col => { const label = col === 'descricao' ? 'Descrição' : 'Comentário'; const hidden = isHidden('coluna', col); return `<th class="min-w-64 px-4 py-3 ${hidden ? 'bg-slate-900/80 text-slate-500' : ''}"><div class="flex items-center gap-1">${label}${visibilityButton('coluna', col, hidden, `coluna ${label}`)}</div></th>`; }).join('');
+            head.innerHTML = `<tr><th class="sticky left-0 z-40 min-w-48 bg-slate-950 px-4 py-3">Indicador</th>${textoHeaders}${referenciasVisiveis.map(ref => { const hidden = isHidden('coluna', ref); return `<th class="min-w-32 px-4 py-2 text-center ${hidden ? 'bg-slate-900/80 text-slate-500' : ''}"><div class="flex items-center justify-center gap-1">${escapeHtml(ref)}${visibilityButton('coluna', ref, hidden, `coluna ${ref}`)}</div></th>`; }).join('')}</tr>`;
+            if (!state.indicadores.length) { body.innerHTML = `<tr><td colspan="${1 + colunasTextoVisiveis.length + referenciasVisiveis.length}" class="px-4 py-10 text-center text-slate-400">Nenhum indicador cadastrado.</td></tr>`; return; }
             const indicadoresVisiveis = state.indicadores.filter(indicador => state.mostrarOcultos || !isHidden('linha', indicador.id));
-            body.innerHTML = indicadoresVisiveis.map(indicador => { const comentario = comentarioFor(indicador.id); const hidden = isHidden('linha', indicador.id); return `<tr class="${hidden ? 'bg-slate-950/50 opacity-60' : 'hover:bg-slate-800/50'}"><td data-edit-indicator="${indicador.id}" data-field="nome" class="group relative sticky left-0 z-20 min-w-48 cursor-cell bg-slate-900 px-4 py-3 pr-9 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}${visibilityButton('linha', indicador.id, hidden, `linha ${indicador.nome}`, 'absolute right-1 top-1')}</td><td data-edit-indicator="${indicador.id}" data-field="descricao" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10">${escapeHtml(indicador.descricao || '—')}</td><td data-comment-indicator="${indicador.id}" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10" title="Clique duas vezes para adicionar ou editar">${escapeHtml(comentario?.comentario || '—')}</td>${referenciasVisiveis.map(ref => { const resultado = resultFor(indicador.id, ref); const columnHidden = isHidden('coluna', ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell whitespace-nowrap px-4 py-3 text-center text-slate-200 hover:bg-cyan-500/10 ${columnHidden ? 'bg-slate-950/50 opacity-60' : ''}">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`; }).join('');
+            const scoreRow = `<tr class="bg-slate-950/80 font-semibold"><td class="sticky left-0 z-20 bg-slate-950 px-4 py-2 text-cyan-200">Pontuação</td>${colunasTextoVisiveis.map(() => '<td class="px-4 py-2 text-slate-500">—</td>').join('')}${referenciasVisiveis.map(ref => { const score = scoreForReference(ref, indicadoresVisiveis.filter(indicador => !isHidden('linha', indicador.id))); const color = score.percent > 50 ? 'bg-emerald-900/70 text-emerald-100' : 'bg-red-900/70 text-red-100'; return `<td class="min-w-32 px-4 py-2 text-center ${color}">${score.score}/${score.total} (${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(score.percent)}%)</td>`; }).join('')}</tr>`;
+            body.innerHTML = scoreRow + indicadoresVisiveis.map(indicador => { const comentario = comentarioFor(indicador.id); const hidden = isHidden('linha', indicador.id); const textoCells = colunasTextoVisiveis.map(col => col === 'descricao' ? `<td data-edit-indicator="${indicador.id}" data-field="descricao" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10 ${isHidden('coluna', 'descricao') ? 'bg-slate-950/50 opacity-60' : ''}">${escapeHtml(indicador.descricao || '—')}</td>` : `<td data-comment-indicator="${indicador.id}" class="min-w-64 cursor-cell px-4 py-3 text-slate-300 hover:bg-cyan-500/10 ${isHidden('coluna', 'comentario') ? 'bg-slate-950/50 opacity-60' : ''}" title="Clique duas vezes para adicionar ou editar">${escapeHtml(comentario?.comentario || '—')}</td>`).join(''); return `<tr class="${hidden ? 'bg-slate-950/50 opacity-60' : 'hover:bg-slate-800/50'}"><td data-edit-indicator="${indicador.id}" data-field="nome" class="group relative sticky left-0 z-20 min-w-48 cursor-cell bg-slate-900 px-4 py-3 pr-9 font-medium text-white hover:bg-cyan-500/10">${escapeHtml(indicador.nome)}${visibilityButton('linha', indicador.id, hidden, `linha ${indicador.nome}`, 'absolute right-1 top-1')}</td>${textoCells}${referenciasVisiveis.map(ref => { const resultado = resultFor(indicador.id, ref); const columnHidden = isHidden('coluna', ref); return `<td data-indicador="${indicador.id}" data-referencia="${ref}" data-valor="${escapeHtml(editableValue(indicador, resultado))}" class="min-w-32 cursor-cell whitespace-nowrap px-4 py-3 text-center text-slate-200 hover:bg-cyan-500/10 ${columnHidden ? 'bg-slate-950/50 opacity-60' : ''}">${escapeHtml(displayValue(indicador, resultado) || '—')}</td>`; }).join('')}</tr>`; }).join('');
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
@@ -423,6 +481,12 @@ try {
         });
 
         document.getElementById('indicator-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'indicador', nome: document.getElementById('indicator-name').value, descricao: document.getElementById('indicator-description').value, formato: document.getElementById('indicator-format').value, respostas_pre_definidas: document.getElementById('indicator-response-type').value }); closeModals(); event.target.reset(); showNotice('Indicador cadastrado.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
+        function renderResponsesModal(indicador) {
+            responsesIndicatorName.textContent = indicador.nome;
+            responsesList.innerHTML = respostasFor(indicador.id).map(resposta => `<div class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3"><div><p class="font-semibold text-white">${escapeHtml(resposta.texto)}</p><p class="text-sm text-slate-400">Ponto: ${escapeHtml(resposta.ponto ?? 0)}</p></div><button type="button" data-delete-response="${resposta.id}" class="rounded-lg border border-red-500/50 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-red-950">Remover</button></div>`).join('') || '<p class="rounded-xl border border-slate-800 bg-slate-950 px-4 py-6 text-center text-slate-400">Nenhuma resposta cadastrada.</p>';
+        }
+        function openResponsesModal(indicador) { activeResponsesIndicatorId = Number(indicador.id); renderResponsesModal(indicador); openModal(responsesModal); }
+
         function startSelectEdit(cell, value, options, saveCallback) {
             if (cell.querySelector('select')) return;
             const select = document.createElement('select');
@@ -450,6 +514,36 @@ try {
             input.addEventListener('blur', save, { once: true });
             input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); input.blur(); } });
         }
+
+        body.addEventListener('contextmenu', event => {
+            const indicatorCell = event.target.closest('[data-edit-indicator][data-field="nome"]');
+            if (!indicatorCell || event.target.closest('[data-visibility-type]')) return;
+            const indicador = state.indicadores.find(item => Number(item.id) === Number(indicatorCell.dataset.editIndicator));
+            if (!indicador || !hasPredefinedResponses(indicador)) return;
+            event.preventDefault();
+            openResponsesModal(indicador);
+        });
+
+        document.getElementById('responses-form').addEventListener('submit', async event => {
+            event.preventDefault();
+            try {
+                await request('POST', { action: 'resposta_pre_definida_add', id_indicador: activeResponsesIndicatorId, texto: document.getElementById('response-text').value, ponto: document.getElementById('response-point').value });
+                event.target.reset();
+                await load();
+                const indicador = state.indicadores.find(item => Number(item.id) === activeResponsesIndicatorId);
+                if (indicador) renderResponsesModal(indicador);
+            } catch (error) { showNotice(error.message, 'error'); }
+        });
+        responsesList.addEventListener('click', async event => {
+            const button = event.target.closest('[data-delete-response]');
+            if (!button) return;
+            try {
+                await request('POST', { action: 'resposta_pre_definida_delete', id: button.dataset.deleteResponse });
+                await load();
+                const indicador = state.indicadores.find(item => Number(item.id) === activeResponsesIndicatorId);
+                if (indicador) renderResponsesModal(indicador);
+            } catch (error) { showNotice(error.message, 'error'); }
+        });
 
         body.addEventListener('dblclick', async event => {
             if (event.target.closest('[data-visibility-type]')) return;
