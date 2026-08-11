@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS indicadores (
     nome VARCHAR(255) NOT NULL,
     descricao TEXT NULL DEFAULT NULL,
     formato ENUM('Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto') NOT NULL,
+    respostas_pre_definidas INT NOT NULL DEFAULT 0,
     INDEX idx_indicadores_nome (nome)
 );
 
@@ -22,10 +23,20 @@ CREATE TABLE IF NOT EXISTS resultados (
     `data` DATE NULL DEFAULT NULL,
     `decimal` DECIMAL(20,4) NULL DEFAULT NULL,
     texto TEXT NULL DEFAULT NULL,
+    id_resposta_definida INT NULL DEFAULT NULL,
     UNIQUE KEY uniq_resultados_empresa_indicador_referencia (id_empresa, id_indicador, referencia),
     INDEX idx_resultados_id_indicador (id_indicador),
+    INDEX idx_resultados_id_resposta_definida (id_resposta_definida),
     CONSTRAINT fk_resultados_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE,
     CONSTRAINT fk_resultados_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS respostas_pre_definidas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    id_indicador INT NOT NULL,
+    texto VARCHAR(255) NOT NULL,
+    INDEX idx_respostas_pre_definidas_id_indicador (id_indicador),
+    CONSTRAINT fk_respostas_pre_definidas_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS comentarios_indicadores (

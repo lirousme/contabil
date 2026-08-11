@@ -48,7 +48,8 @@ function validateIndicador(array $data): array
     if (!in_array($formato, $formatos, true)) {
         throw new InvalidArgumentException('Escolha um formato válido.');
     }
-    return [$nome, $descricao, $formato];
+    $respostasPreDefinidas = (int) ($data['respostas_pre_definidas'] ?? 0) === 1 ? 1 : 0;
+    return [$nome, $descricao, $formato, $respostasPreDefinidas];
 }
 
 
@@ -124,23 +125,24 @@ try {
                 jsonResponse(['error' => 'Empresa não encontrada.'], 404);
             }
 
-            $indicadores = $pdo->query('SELECT id, nome, descricao, formato FROM indicadores ORDER BY nome')->fetchAll();
+            $indicadores = $pdo->query('SELECT id, nome, descricao, formato, respostas_pre_definidas FROM indicadores ORDER BY nome')->fetchAll();
             $referencias = referenciasDisponiveis();
-            $resultadosStmt = $pdo->prepare('SELECT id_empresa, id_indicador, referencia, `data`, `decimal`, texto FROM resultados WHERE id_empresa = :id_empresa');
+            $resultadosStmt = $pdo->prepare('SELECT id_empresa, id_indicador, referencia, `data`, `decimal`, texto, id_resposta_definida FROM resultados WHERE id_empresa = :id_empresa');
             $resultadosStmt->execute(['id_empresa' => $empresaId]);
             $comentariosStmt = $pdo->prepare('SELECT id, comentario, id_indicador, id_empresa FROM comentarios_indicadores WHERE id_empresa = :id_empresa');
             $comentariosStmt->execute(['id_empresa' => $empresaId]);
             $ocultosStmt = $pdo->prepare('SELECT tipo, chave FROM resultados_ocultos WHERE id_empresa = :id_empresa');
             $ocultosStmt->execute(['id_empresa' => $empresaId]);
-            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll(), 'ocultos' => $ocultosStmt->fetchAll()]);
+            $respostasPreDefinidas = $pdo->query('SELECT id, id_indicador, texto FROM respostas_pre_definidas ORDER BY id_indicador, texto')->fetchAll();
+            jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll(), 'ocultos' => $ocultosStmt->fetchAll(), 'respostas_pre_definidas' => $respostasPreDefinidas]);
         }
 
         if ($method === 'POST') {
             $action = $data['action'] ?? '';
             if ($action === 'indicador') {
-                [$nome, $descricao, $formato] = validateIndicador($data);
-                $stmt = $pdo->prepare('INSERT INTO indicadores (nome, descricao, formato) VALUES (:nome, :descricao, :formato)');
-                $stmt->execute(['nome' => $nome, 'descricao' => $descricao, 'formato' => $formato]);
+                [$nome, $descricao, $formato, $respostasPreDefinidas] = validateIndicador($data);
+                $stmt = $pdo->prepare('INSERT INTO indicadores (nome, descricao, formato, respostas_pre_definidas) VALUES (:nome, :descricao, :formato, :respostas_pre_definidas)');
+                $stmt->execute(['nome' => $nome, 'descricao' => $descricao, 'formato' => $formato, 'respostas_pre_definidas' => $respostasPreDefinidas]);
                 jsonResponse(['message' => 'Indicador cadastrado.'], 201);
             }
             if ($action === 'indicador_update') {
@@ -166,19 +168,27 @@ try {
                 $indicadorId = (int) ($data['id_indicador'] ?? 0);
                 $referencia = (string) ($data['referencia'] ?? '');
                 $valor = trim((string) ($data['valor'] ?? ''));
-                $stmt = $pdo->prepare('SELECT formato FROM indicadores WHERE id = :id');
+                $stmt = $pdo->prepare('SELECT formato, respostas_pre_definidas FROM indicadores WHERE id = :id');
                 $stmt->execute(['id' => $indicadorId]);
-                $formato = $stmt->fetchColumn();
-                if (!$formato) throw new InvalidArgumentException('Indicador inválido.');
+                $indicadorResultado = $stmt->fetch();
+                if (!$indicadorResultado) throw new InvalidArgumentException('Indicador inválido.');
                 if (!in_array($referencia, referenciasDisponiveis(), true)) throw new InvalidArgumentException('Referência inválida.');
-                $fields = ['data' => null, 'decimal' => null, 'texto' => null];
-                if ($valor !== '') {
-                    if ($formato === 'Data') $fields['data'] = $valor;
-                    elseif ($formato === 'Texto') $fields['texto'] = $valor;
+                $fields = ['data' => null, 'decimal' => null, 'texto' => null, 'id_resposta_definida' => null];
+                if ((int) $indicadorResultado['respostas_pre_definidas'] === 1) {
+                    if ($valor !== '') {
+                        $respostaId = filter_var($valor, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                        $respostaStmt = $pdo->prepare('SELECT COUNT(*) FROM respostas_pre_definidas WHERE id = :id AND id_indicador = :id_indicador');
+                        $respostaStmt->execute(['id' => $respostaId ?: 0, 'id_indicador' => $indicadorId]);
+                        if (!$respostaId || (int) $respostaStmt->fetchColumn() === 0) throw new InvalidArgumentException('Resposta pré-definida inválida.');
+                        $fields['id_resposta_definida'] = $respostaId;
+                    }
+                } elseif ($valor !== '') {
+                    if ($indicadorResultado['formato'] === 'Data') $fields['data'] = $valor;
+                    elseif ($indicadorResultado['formato'] === 'Texto') $fields['texto'] = $valor;
                     else $fields['decimal'] = parseDecimalValue($valor);
                 }
-                $upsert = $pdo->prepare('INSERT INTO resultados (id_empresa, id_indicador, referencia, `data`, `decimal`, texto) VALUES (:id_empresa, :id_indicador, :referencia, :data, :decimal, :texto) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`), `decimal` = VALUES(`decimal`), texto = VALUES(texto)');
-                $upsert->execute(['id_empresa' => $empresaId, 'id_indicador' => $indicadorId, 'referencia' => $referencia, 'data' => $fields['data'], 'decimal' => $fields['decimal'], 'texto' => $fields['texto']]);
+                $upsert = $pdo->prepare('INSERT INTO resultados (id_empresa, id_indicador, referencia, `data`, `decimal`, texto, id_resposta_definida) VALUES (:id_empresa, :id_indicador, :referencia, :data, :decimal, :texto, :id_resposta_definida) ON DUPLICATE KEY UPDATE `data` = VALUES(`data`), `decimal` = VALUES(`decimal`), texto = VALUES(texto), id_resposta_definida = VALUES(id_resposta_definida)');
+                $upsert->execute(['id_empresa' => $empresaId, 'id_indicador' => $indicadorId, 'referencia' => $referencia, 'data' => $fields['data'], 'decimal' => $fields['decimal'], 'texto' => $fields['texto'], 'id_resposta_definida' => $fields['id_resposta_definida']]);
                 jsonResponse(['message' => 'Resultado salvo.']);
             }
             if ($action === 'comentario') {
@@ -268,6 +278,7 @@ try {
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Nome</span><input id="indicator-name" required class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"></label>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Descrição</span><textarea id="indicator-description" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"></textarea></label>
             <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Formato</span><select id="indicator-format" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"><option>Moeda</option><option>Porcentagem</option><option>Número Inteiro</option><option>Data</option><option>Texto</option></select></label>
+            <label class="mt-4 block"><span class="mb-2 block text-sm text-slate-300">Tipo de resposta</span><select id="indicator-response-type" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500"><option value="0" selected>Resposta aberta</option><option value="1">Respostas pré-definidas</option></select></label>
             <div class="mt-6 flex justify-end gap-3"><button type="button" data-close class="rounded-xl border border-slate-700 px-5 py-3 font-semibold text-slate-200 hover:bg-slate-800">Cancelar</button><button class="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Salvar</button></div>
         </form>
     </div>
@@ -275,7 +286,7 @@ try {
     <script>
         const empresaId = <?= (int) ($_GET['empresa'] ?? $_GET['id_empresa'] ?? 0) ?>;
         const apiUrl = `<?= e($_SERVER['SCRIPT_NAME'] ?? '/resultados.php') ?>?api=resultados&empresa=${empresaId}`;
-        const state = { indicadores: [], referencias: [], resultados: [], comentarios: [], ocultos: [], mostrarOcultos: false };
+        const state = { indicadores: [], referencias: [], resultados: [], comentarios: [], ocultos: [], respostasPreDefinidas: [], mostrarOcultos: false };
         const notice = document.getElementById('notice');
         const head = document.getElementById('results-head');
         const body = document.getElementById('results-body');
@@ -345,12 +356,16 @@ try {
         function closeModals() { indicatorModal.classList.add('hidden'); indicatorModal.classList.remove('flex'); }
         function resultFor(indicadorId, referencia) { return state.resultados.find(item => Number(item.id_indicador) === Number(indicadorId) && item.referencia === referencia); }
         function comentarioFor(indicadorId) { return state.comentarios.find(item => Number(item.id_indicador) === Number(indicadorId)); }
+        function respostasFor(indicadorId) { return state.respostasPreDefinidas.filter(item => Number(item.id_indicador) === Number(indicadorId)); }
+        function respostaFor(id) { return state.respostasPreDefinidas.find(item => Number(item.id) === Number(id)); }
+        function hasPredefinedResponses(indicador) { return Number(indicador.respostas_pre_definidas) === 1; }
         function formatDecimalValue(value) {
             const number = Number(value);
             return Number.isFinite(number) ? number : null;
         }
         function displayValue(indicador, resultado) {
             if (!resultado) return '';
+            if (hasPredefinedResponses(indicador)) return respostaFor(resultado.id_resposta_definida)?.texto ?? '';
             if (indicador.formato === 'Data') return resultado.data ?? '';
             if (indicador.formato === 'Texto') return resultado.texto ?? '';
             const number = formatDecimalValue(resultado.decimal);
@@ -362,6 +377,7 @@ try {
         }
         function editableValue(indicador, resultado) {
             if (!resultado) return '';
+            if (hasPredefinedResponses(indicador)) return resultado.id_resposta_definida ?? '';
             if (indicador.formato === 'Data') return resultado.data ?? '';
             if (indicador.formato === 'Texto') return resultado.texto ?? '';
             return resultado.decimal ?? '';
@@ -384,7 +400,7 @@ try {
         }
 
         async function request(method = 'GET', data = null) { const response = await fetch(apiUrl, { method, headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : null }); const json = await response.json(); if (!response.ok) throw new Error(json.error || 'Erro inesperado.'); return json; }
-        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; state.comentarios = data.comentarios; state.ocultos = data.ocultos; render(); }
+        async function load() { const data = await request(); empresaTitle.textContent = data.empresa.nome_da_empresa; state.indicadores = data.indicadores; state.referencias = data.referencias; state.resultados = data.resultados; state.comentarios = data.comentarios; state.ocultos = data.ocultos; state.respostasPreDefinidas = data.respostas_pre_definidas || []; render(); }
 
         quickCopy.addEventListener('click', copyQuickResult);
         quickMultiplier.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); copyQuickResult(); } });
@@ -406,7 +422,21 @@ try {
             }
         });
 
-        document.getElementById('indicator-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'indicador', nome: document.getElementById('indicator-name').value, descricao: document.getElementById('indicator-description').value, formato: document.getElementById('indicator-format').value }); closeModals(); event.target.reset(); showNotice('Indicador cadastrado.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
+        document.getElementById('indicator-form').addEventListener('submit', async event => { event.preventDefault(); try { await request('POST', { action: 'indicador', nome: document.getElementById('indicator-name').value, descricao: document.getElementById('indicator-description').value, formato: document.getElementById('indicator-format').value, respostas_pre_definidas: document.getElementById('indicator-response-type').value }); closeModals(); event.target.reset(); showNotice('Indicador cadastrado.'); await load(); } catch (error) { showNotice(error.message, 'error'); } });
+        function startSelectEdit(cell, value, options, saveCallback) {
+            if (cell.querySelector('select')) return;
+            const select = document.createElement('select');
+            select.className = 'w-full rounded-lg border border-cyan-500 bg-slate-950 px-2 py-1 text-center text-white outline-none';
+            select.innerHTML = `<option value="">Selecione</option>${options.map(option => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.texto)}</option>`).join('')}`;
+            select.value = value;
+            cell.textContent = '';
+            cell.appendChild(select);
+            select.focus();
+            async function save() { try { await saveCallback(select.value); await load(); } catch (error) { showNotice(error.message, 'error'); await load(); } }
+            select.addEventListener('blur', save, { once: true });
+            select.addEventListener('change', () => select.blur());
+        }
+
         function startCellEdit(cell, value, inputType, saveCallback, align = 'text-center') {
             if (cell.querySelector('input, textarea')) return;
             const input = document.createElement(inputType === 'textarea' ? 'textarea' : 'input');
@@ -442,7 +472,12 @@ try {
             if (!cell) return;
             const indicador = state.indicadores.find(item => Number(item.id) === Number(cell.dataset.indicador));
             const current = cell.dataset.valor || '';
-            startCellEdit(cell, current, indicador.formato === 'Data' ? 'date' : 'text', value => request('POST', { action: 'resultado', id_indicador: cell.dataset.indicador, referencia: cell.dataset.referencia, valor: value }));
+            const saveResultado = value => request('POST', { action: 'resultado', id_indicador: cell.dataset.indicador, referencia: cell.dataset.referencia, valor: value });
+            if (hasPredefinedResponses(indicador)) {
+                startSelectEdit(cell, current, respostasFor(indicador.id), saveResultado);
+                return;
+            }
+            startCellEdit(cell, current, indicador.formato === 'Data' ? 'date' : 'text', saveResultado);
         });
         load().catch(error => showNotice(error.message, 'error'));
     </script>
