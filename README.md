@@ -13,3 +13,4 @@ php -S localhost:8000 -t public
 ```
 
 Todas as páginas usam Tailwind CSS com tema escuro habilitado por padrão.
+Todas as páginas evitam espaçamentos vazios, para evitar desperdício de espaço. 
