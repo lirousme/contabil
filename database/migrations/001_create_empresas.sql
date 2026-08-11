@@ -1,9 +1,18 @@
+CREATE TABLE IF NOT EXISTS setores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    UNIQUE KEY uniq_setores_nome (nome)
+);
+
 CREATE TABLE IF NOT EXISTS empresas (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome_da_empresa VARCHAR(255) NOT NULL,
     cod_cvm VARCHAR(20) NULL DEFAULT NULL,
+    id_setor INT NULL DEFAULT NULL,
     INDEX idx_empresas_nome_da_empresa (nome_da_empresa),
-    INDEX idx_empresas_cod_cvm (cod_cvm)
+    INDEX idx_empresas_cod_cvm (cod_cvm),
+    INDEX idx_empresas_id_setor (id_setor),
+    CONSTRAINT fk_empresas_setor FOREIGN KEY (id_setor) REFERENCES setores (id) ON DELETE SET NULL
 );
 
 
@@ -13,7 +22,10 @@ CREATE TABLE IF NOT EXISTS indicadores (
     descricao TEXT NULL DEFAULT NULL,
     formato ENUM('Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto') NOT NULL,
     respostas_pre_definidas INT NOT NULL DEFAULT 0,
-    INDEX idx_indicadores_nome (nome)
+    id_setor INT NULL DEFAULT NULL,
+    INDEX idx_indicadores_nome (nome),
+    INDEX idx_indicadores_id_setor (id_setor),
+    CONSTRAINT fk_indicadores_setor FOREIGN KEY (id_setor) REFERENCES setores (id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS resultados (
