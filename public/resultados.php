@@ -118,14 +118,16 @@ try {
         $data = payload();
 
         if ($method === 'GET') {
-            $empresaStmt = $pdo->prepare('SELECT id, nome_da_empresa FROM empresas WHERE id = :id');
+            $empresaStmt = $pdo->prepare('SELECT id, nome_da_empresa, id_setor FROM empresas WHERE id = :id');
             $empresaStmt->execute(['id' => $empresaId]);
             $empresa = $empresaStmt->fetch();
             if (!$empresa) {
                 jsonResponse(['error' => 'Empresa não encontrada.'], 404);
             }
 
-            $indicadores = $pdo->query('SELECT id, nome, descricao, formato, respostas_pre_definidas FROM indicadores ORDER BY nome')->fetchAll();
+            $indicadoresStmt = $pdo->prepare('SELECT id, nome, descricao, formato, respostas_pre_definidas, id_setor FROM indicadores WHERE id_setor <=> :id_setor ORDER BY nome');
+            $indicadoresStmt->execute(['id_setor' => $empresa['id_setor']]);
+            $indicadores = $indicadoresStmt->fetchAll();
             $referencias = referenciasDisponiveis();
             $resultadosStmt = $pdo->prepare('SELECT id_empresa, id_indicador, referencia, `data`, `decimal`, texto, id_resposta_definida FROM resultados WHERE id_empresa = :id_empresa');
             $resultadosStmt->execute(['id_empresa' => $empresaId]);
@@ -133,7 +135,9 @@ try {
             $comentariosStmt->execute(['id_empresa' => $empresaId]);
             $ocultosStmt = $pdo->prepare('SELECT tipo, chave FROM resultados_ocultos WHERE id_empresa = :id_empresa');
             $ocultosStmt->execute(['id_empresa' => $empresaId]);
-            $respostasPreDefinidas = $pdo->query('SELECT id, id_indicador, texto, ponto FROM respostas_pre_definidas ORDER BY id_indicador, texto')->fetchAll();
+            $respostasStmt = $pdo->prepare('SELECT respostas_pre_definidas.id, respostas_pre_definidas.id_indicador, respostas_pre_definidas.texto, respostas_pre_definidas.ponto FROM respostas_pre_definidas INNER JOIN indicadores ON indicadores.id = respostas_pre_definidas.id_indicador WHERE indicadores.id_setor <=> :id_setor ORDER BY respostas_pre_definidas.id_indicador, respostas_pre_definidas.texto');
+            $respostasStmt->execute(['id_setor' => $empresa['id_setor']]);
+            $respostasPreDefinidas = $respostasStmt->fetchAll();
             jsonResponse(['empresa' => $empresa, 'indicadores' => $indicadores, 'referencias' => $referencias, 'resultados' => $resultadosStmt->fetchAll(), 'comentarios' => $comentariosStmt->fetchAll(), 'ocultos' => $ocultosStmt->fetchAll(), 'respostas_pre_definidas' => $respostasPreDefinidas]);
         }
 
@@ -141,8 +145,13 @@ try {
             $action = $data['action'] ?? '';
             if ($action === 'indicador') {
                 [$nome, $descricao, $formato, $respostasPreDefinidas] = validateIndicador($data);
-                $stmt = $pdo->prepare('INSERT INTO indicadores (nome, descricao, formato, respostas_pre_definidas) VALUES (:nome, :descricao, :formato, :respostas_pre_definidas)');
-                $stmt->execute(['nome' => $nome, 'descricao' => $descricao, 'formato' => $formato, 'respostas_pre_definidas' => $respostasPreDefinidas]);
+                $empresaSetorStmt = $pdo->prepare('SELECT id_setor FROM empresas WHERE id = :id');
+                $empresaSetorStmt->execute(['id' => $empresaId]);
+                $empresaSetorRow = $empresaSetorStmt->fetch();
+                if (!$empresaSetorRow) throw new InvalidArgumentException('Empresa inválida.');
+                $empresaSetor = $empresaSetorRow['id_setor'];
+                $stmt = $pdo->prepare('INSERT INTO indicadores (nome, descricao, formato, respostas_pre_definidas, id_setor) VALUES (:nome, :descricao, :formato, :respostas_pre_definidas, :id_setor)');
+                $stmt->execute(['nome' => $nome, 'descricao' => $descricao, 'formato' => $formato, 'respostas_pre_definidas' => $respostasPreDefinidas, 'id_setor' => $empresaSetor]);
                 jsonResponse(['message' => 'Indicador cadastrado.'], 201);
             }
             if ($action === 'indicador_update') {

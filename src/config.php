@@ -45,20 +45,62 @@ function db(): PDO
 
 function ensureEmpresasTable(PDO $pdo): void
 {
+    ensureSetoresTable($pdo);
+
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS empresas (
             id INT AUTO_INCREMENT PRIMARY KEY,
             nome_da_empresa VARCHAR(255) NOT NULL,
             cod_cvm VARCHAR(20) NULL DEFAULT NULL,
+            id_setor INT NULL DEFAULT NULL,
             INDEX idx_empresas_nome_da_empresa (nome_da_empresa),
-            INDEX idx_empresas_cod_cvm (cod_cvm)
+            INDEX idx_empresas_cod_cvm (cod_cvm),
+            INDEX idx_empresas_id_setor (id_setor),
+            CONSTRAINT fk_empresas_setor FOREIGN KEY (id_setor) REFERENCES setores (id) ON DELETE SET NULL
         )'
     );
 
     ensureCodCvmColumn($pdo);
+    ensureSetorColumn($pdo, 'empresas', 'fk_empresas_setor');
     ensureIndex($pdo, 'empresas', 'idx_empresas_nome_da_empresa', 'CREATE INDEX idx_empresas_nome_da_empresa ON empresas (nome_da_empresa)');
     ensureIndex($pdo, 'empresas', 'idx_empresas_cod_cvm', 'CREATE INDEX idx_empresas_cod_cvm ON empresas (cod_cvm)');
+    ensureIndex($pdo, 'empresas', 'idx_empresas_id_setor', 'CREATE INDEX idx_empresas_id_setor ON empresas (id_setor)');
     ensureTickersTable($pdo);
+}
+
+function ensureSetoresTable(PDO $pdo): void
+{
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS setores (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(255) NOT NULL,
+            UNIQUE KEY uniq_setores_nome (nome)
+        )'
+    );
+}
+
+function constraintExists(PDO $pdo, string $table, string $constraint): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND CONSTRAINT_NAME = :constraint'
+    );
+    $stmt->execute(['table' => $table, 'constraint' => $constraint]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+function ensureSetorColumn(PDO $pdo, string $table, string $constraint): void
+{
+    if (!tableHasColumn($pdo, $table, 'id_setor')) {
+        $pdo->exec(sprintf('ALTER TABLE %s ADD id_setor INT NULL DEFAULT NULL', $table));
+    }
+
+    ensureIndex($pdo, $table, 'idx_' . $table . '_id_setor', sprintf('CREATE INDEX idx_%s_id_setor ON %s (id_setor)', $table, $table));
+
+    if (!constraintExists($pdo, $table, $constraint)) {
+        $pdo->exec(sprintf('ALTER TABLE %s ADD CONSTRAINT %s FOREIGN KEY (id_setor) REFERENCES setores (id) ON DELETE SET NULL', $table, $constraint));
+    }
 }
 
 function ensureTickersTable(PDO $pdo): void
@@ -127,7 +169,10 @@ function ensureResultadosTables(PDO $pdo): void
             descricao TEXT NULL DEFAULT NULL,
             formato ENUM('Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto') NOT NULL,
             respostas_pre_definidas INT NOT NULL DEFAULT 0,
-            INDEX idx_indicadores_nome (nome)
+            id_setor INT NULL DEFAULT NULL,
+            INDEX idx_indicadores_nome (nome),
+            INDEX idx_indicadores_id_setor (id_setor),
+            CONSTRAINT fk_indicadores_setor FOREIGN KEY (id_setor) REFERENCES setores (id) ON DELETE SET NULL
         )"
     );
 
@@ -135,6 +180,7 @@ function ensureResultadosTables(PDO $pdo): void
     if (!tableHasColumn($pdo, 'indicadores', 'respostas_pre_definidas')) {
         $pdo->exec('ALTER TABLE indicadores ADD respostas_pre_definidas INT NOT NULL DEFAULT 0');
     }
+    ensureSetorColumn($pdo, 'indicadores', 'fk_indicadores_setor');
 
     if (tableHasColumn($pdo, 'resultados', 'id_referencia')) {
         $pdo->exec('DROP TABLE IF EXISTS resultados_nova');
@@ -231,6 +277,7 @@ function ensureResultadosTables(PDO $pdo): void
     $pdo->exec('DROP TABLE IF EXISTS referencias');
 
     ensureIndex($pdo, 'indicadores', 'idx_indicadores_nome', 'CREATE INDEX idx_indicadores_nome ON indicadores (nome)');
+    ensureIndex($pdo, 'indicadores', 'idx_indicadores_id_setor', 'CREATE INDEX idx_indicadores_id_setor ON indicadores (id_setor)');
     ensureIndex($pdo, 'resultados', 'idx_resultados_id_indicador', 'CREATE INDEX idx_resultados_id_indicador ON resultados (id_indicador)');
     ensureIndex($pdo, 'resultados', 'idx_resultados_id_resposta_definida', 'CREATE INDEX idx_resultados_id_resposta_definida ON resultados (id_resposta_definida)');
     ensureIndex($pdo, 'respostas_pre_definidas', 'idx_respostas_pre_definidas_id_indicador', 'CREATE INDEX idx_respostas_pre_definidas_id_indicador ON respostas_pre_definidas (id_indicador)');
