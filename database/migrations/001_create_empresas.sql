@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS respostas_pre_definidas (
     id INT AUTO_INCREMENT PRIMARY KEY,
     id_indicador INT NOT NULL,
     texto VARCHAR(255) NOT NULL,
+    ponto INT NOT NULL DEFAULT 0,
     INDEX idx_respostas_pre_definidas_id_indicador (id_indicador),
     CONSTRAINT fk_respostas_pre_definidas_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
 );
