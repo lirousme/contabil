@@ -126,11 +126,15 @@ function ensureResultadosTables(PDO $pdo): void
             nome VARCHAR(255) NOT NULL,
             descricao TEXT NULL DEFAULT NULL,
             formato ENUM('Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto') NOT NULL,
+            respostas_pre_definidas INT NOT NULL DEFAULT 0,
             INDEX idx_indicadores_nome (nome)
         )"
     );
 
     $pdo->exec("ALTER TABLE indicadores MODIFY formato ENUM('Moeda', 'Porcentagem', 'Número Inteiro', 'Data', 'Texto') NOT NULL");
+    if (!tableHasColumn($pdo, 'indicadores', 'respostas_pre_definidas')) {
+        $pdo->exec('ALTER TABLE indicadores ADD respostas_pre_definidas INT NOT NULL DEFAULT 0');
+    }
 
     if (tableHasColumn($pdo, 'resultados', 'id_referencia')) {
         $pdo->exec('DROP TABLE IF EXISTS resultados_nova');
@@ -142,6 +146,7 @@ function ensureResultadosTables(PDO $pdo): void
                 `data` DATE NULL DEFAULT NULL,
                 `decimal` DECIMAL(20,4) NULL DEFAULT NULL,
                 texto TEXT NULL DEFAULT NULL,
+                id_resposta_definida INT NULL DEFAULT NULL,
                 UNIQUE KEY uniq_resultados_empresa_indicador_referencia (id_empresa, id_indicador, referencia),
                 INDEX idx_resultados_id_indicador (id_indicador),
                 CONSTRAINT fk_resultados_nova_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE,
@@ -173,10 +178,25 @@ function ensureResultadosTables(PDO $pdo): void
             `data` DATE NULL DEFAULT NULL,
             `decimal` DECIMAL(20,4) NULL DEFAULT NULL,
             texto TEXT NULL DEFAULT NULL,
+            id_resposta_definida INT NULL DEFAULT NULL,
             UNIQUE KEY uniq_resultados_empresa_indicador_referencia (id_empresa, id_indicador, referencia),
             INDEX idx_resultados_id_indicador (id_indicador),
+            INDEX idx_resultados_id_resposta_definida (id_resposta_definida),
             CONSTRAINT fk_resultados_empresa FOREIGN KEY (id_empresa) REFERENCES empresas (id) ON DELETE CASCADE,
             CONSTRAINT fk_resultados_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
+        )"
+    );
+    if (!tableHasColumn($pdo, 'resultados', 'id_resposta_definida')) {
+        $pdo->exec('ALTER TABLE resultados ADD id_resposta_definida INT NULL DEFAULT NULL');
+    }
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS respostas_pre_definidas (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            id_indicador INT NOT NULL,
+            texto VARCHAR(255) NOT NULL,
+            INDEX idx_respostas_pre_definidas_id_indicador (id_indicador),
+            CONSTRAINT fk_respostas_pre_definidas_indicador FOREIGN KEY (id_indicador) REFERENCES indicadores (id) ON DELETE CASCADE
         )"
     );
 
@@ -207,5 +227,7 @@ function ensureResultadosTables(PDO $pdo): void
 
     ensureIndex($pdo, 'indicadores', 'idx_indicadores_nome', 'CREATE INDEX idx_indicadores_nome ON indicadores (nome)');
     ensureIndex($pdo, 'resultados', 'idx_resultados_id_indicador', 'CREATE INDEX idx_resultados_id_indicador ON resultados (id_indicador)');
+    ensureIndex($pdo, 'resultados', 'idx_resultados_id_resposta_definida', 'CREATE INDEX idx_resultados_id_resposta_definida ON resultados (id_resposta_definida)');
+    ensureIndex($pdo, 'respostas_pre_definidas', 'idx_respostas_pre_definidas_id_indicador', 'CREATE INDEX idx_respostas_pre_definidas_id_indicador ON respostas_pre_definidas (id_indicador)');
     ensureIndex($pdo, 'comentarios_indicadores', 'idx_comentarios_indicadores_id_indicador', 'CREATE INDEX idx_comentarios_indicadores_id_indicador ON comentarios_indicadores (id_indicador)');
 }
